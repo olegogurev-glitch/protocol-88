@@ -6,7 +6,8 @@
 (() => {
   const A = window.AudioEngine;
   const cvs = document.getElementById('game');
-  const ctx = cvs.getContext('2d');
+  const mainCtx = cvs.getContext('2d');
+  let ctx = mainCtx; // swapped temporarily when stamping corpses onto the floor
   const FONT = '"Press Start 2P", "Courier New", monospace';
   const font = px => `${Math.round(px)}px ${FONT}`;
   if (document.fonts && document.fonts.load) document.fonts.load('16px "Press Start 2P"').catch(() => {});
@@ -383,6 +384,29 @@
     }
   }
 
+  const corpseCv = document.createElement('canvas');
+  corpseCv.width = corpseCv.height = 400;
+  const cctx = corpseCv.getContext('2d');
+  function stampCorpse(e) {
+    const size = Math.min(400, Math.ceil(e.r * 6));
+    cctx.setTransform(1, 0, 0, 1, 0, 0);
+    cctx.globalCompositeOperation = 'source-over';
+    cctx.clearRect(0, 0, size, size);
+    const ghost = Object.assign({}, e, { x: size / 2, y: size / 2, corpse: true, flash: 0, spawnT: 0, hitT: 0, biteT: 0, st: null,
+      fuse: 0, under: false, cloaked: false, shieldFlash: 0, near: false, angle: e.angle + rand(-0.4, 0.4) });
+    const saved = ctx;
+    ctx = cctx;
+    try { drawEnemy(ghost); } finally { ctx = saved; curlLegs = false; }
+    cctx.globalCompositeOperation = 'source-atop';
+    cctx.fillStyle = 'rgba(14,8,6,0.55)';
+    cctx.fillRect(0, 0, size, size);
+    cctx.globalCompositeOperation = 'source-over';
+    fctx.save();
+    fctx.globalAlpha = 0.9;
+    fctx.drawImage(corpseCv, 0, 0, size, size, e.x - size / 2, e.y - size / 2, size, size);
+    fctx.restore();
+  }
+
   function splat(x, y, size, color, n = 7) {
     fctx.save();
     fctx.fillStyle = color;
@@ -433,6 +457,7 @@
   const keys = {};
   const mouse = { x: innerWidth / 2, y: innerHeight / 2, down: false };
   let dashQueued = false;
+  const camKick = { x: 0, y: 0 }; // camera shove from weapon recoil
   let menuOptRect = null;
   let hunt = false; // true when only a few stragglers remain
   let nowPlaying = null; // { name, mode, t }
@@ -485,6 +510,7 @@
       spin: 0, overdrive: 0, aegis: 0, chrono: 0, walk: 0, moving: 0,
       gear: { armor: 0, vital: 0, shield: 0, boots: 0, drone: 0 },
       shield: 0, shieldMax: 0, shieldDelay: 0, shieldHit: 0, drones: [], hazardT: 0,
+      legA: -Math.PI / 2, kickA: 0, swapT: 0, hitT: 0, pumpT: 0, heat: 0, stepSign: 1, flashRot: 0,
       ws: WEAPONS.map((w, i) => ({ owned: i === 0, ammo: i === 0 ? Infinity : 0, lvl: 0 })),
     };
   }
@@ -497,6 +523,7 @@
     p.prev = p.cur; p.cur = i;
     p.fireCd = Math.max(p.fireCd, 0.12);
     p.spin = 0;
+    p.swapT = 0.28;
     if (!silent) A.sfx('switch');
     return true;
   }
@@ -576,6 +603,23 @@
       p.vx = lerp(p.vx, mx * speed, k); p.vy = lerp(p.vy, my * speed, k);
     }
     p.moving = ml ? 1 : 0;
+    const spdNow = Math.hypot(p.vx, p.vy);
+    if (spdNow > 30) {
+      let la = Math.atan2(p.vy, p.vx);
+      if (Math.abs(angDiff(p.angle, la)) > 1.9) la += Math.PI; // walking backwards: legs face the aim, stride reverses
+      p.legA += angDiff(p.legA, la) * Math.min(1, dt * 14);
+    } else p.legA += angDiff(p.legA, p.angle) * Math.min(1, dt * 4);
+    const stepS = Math.sin(p.walk) >= 0 ? 1 : -1;
+    if (stepS !== p.stepSign) {
+      p.stepSign = stepS;
+      if (spdNow > 120) {
+        const fx = p.x + Math.cos(p.legA + stepS * 1.4) * 7, fy = p.y + Math.sin(p.legA + stepS * 1.4) * 7;
+        part({ kind: 'smoke', x: fx, y: fy, vx: -p.vx * 0.1, vy: -p.vy * 0.1, life: 0.35, size: 4, drag: 4, color: arena.style === 'organic' ? '90,30,70' : '110,110,120' });
+      }
+    }
+    p.kickA *= Math.exp(-dt * 16);
+    p.swapT -= dt; p.hitT -= dt; p.pumpT -= dt;
+    p.heat = Math.max(0, p.heat - dt * 0.6);
     if (p.gear.boots && ml && Math.random() < 0.25 * p.gear.boots) {
       part({ kind: 'spark', x: p.x - p.vx * 0.03, y: p.y - p.vy * 0.03, vx: -p.vx * 0.3 + rand(-30, 30), vy: -p.vy * 0.3 + rand(-30, 30), life: 0.25, size: 1.5, color: '#ffd23a', drag: 4, glow: true });
     }
@@ -633,10 +677,25 @@
       }
     }
     p.muzzle = 0.05;
+    p.flashRot = rand(-0.4, 0.4);
     p.recoil = w.recoil;
+    p.kickA += (Math.random() < 0.5 ? -1 : 1) * w.recoil * rand(0.008, 0.02);
+    camKick.x -= ca * w.recoil * 0.9; camKick.y -= sa * w.recoil * 0.9;
+    if (w.id === 'smg' || w.id === 'minigun') p.heat = Math.min(1, p.heat + 0.025);
+    if (w.id === 'shotgun') {
+      p.pumpT = 0.4;
+      setTimeout(() => {
+        if (!player || state !== 'play') return;
+        const c2 = Math.cos(player.angle), s2 = Math.sin(player.angle);
+        part({ kind: 'shell', x: player.x + c2 * 10 - s2 * 5, y: player.y + s2 * 10 + c2 * 5, vx: -s2 * 150 + rand(-30, 30), vy: c2 * 150 + rand(-30, 30), life: 0.9, rot: rand(0, TAU), vr: rand(-15, 15), drag: 4, color: '#d83a2a', size: 1.6 });
+      }, 180);
+    }
+    if (w.kind === 'rocket') {
+      for (let i = 0; i < 8; i++) part({ kind: i < 4 ? 'fire' : 'smoke', x: p.x - ca * 18, y: p.y - sa * 18, vx: -ca * rand(120, 260) + rand(-60, 60), vy: -sa * rand(120, 260) + rand(-60, 60), life: rand(0.25, 0.5), size: rand(6, 12), drag: 4, glow: i < 4, color: '80,80,80' });
+    }
     shake = Math.min(shake + w.shake, 30);
     A.sfx(w.id);
-    if (w.kind === 'bullet' && Math.random() < (w.rate > 12 ? 0.5 : 1)) {
+    if (w.kind === 'bullet' && w.id !== 'shotgun' && Math.random() < (w.rate > 12 ? 0.5 : 1)) {
       part({ kind: 'shell', x: p.x + ca * 8 - sa * 5, y: p.y + sa * 8 + ca * 5,
         vx: -sa * rand(90, 160) + rand(-30, 30), vy: ca * rand(90, 160) + rand(-30, 30),
         life: rand(0.5, 0.9), rot: rand(0, TAU), vr: rand(-20, 20), drag: 5, color: '#d8b04a' });
@@ -826,6 +885,7 @@
     if (dmg <= 0) { A.sfx('shield'); p.invuln = 0.2; return; }
     p.hp -= dmg;
     p.invuln = 0.28;
+    p.hitT = 0.22;
     hurtFlash = Math.min(1, hurtFlash + 0.45 + dmg / 40);
     shake = Math.min(30, shake + 6 + dmg * 0.25);
     if (src) {
@@ -1293,9 +1353,13 @@
     e.kx *= kd; e.ky *= kd;
     const vm = Math.hypot(e.vx, e.vy);
     e.walk += vm * dt * 0.09;
+    const prevA = e.angle;
+    e.hitT -= dt; e.biteT -= dt;
+    e.near = d < e.r + p.r + 45;
     if (e.type === 'warden') e.angle += clamp(angDiff(e.angle, Math.atan2(uy, ux)), -1.5 * dt, 1.5 * dt); // slow turn: flank it
     else if (faceTarget) e.angle += angDiff(e.angle, Math.atan2(uy, ux)) * Math.min(1, dt * 12);
     else if (vm > 10) e.angle += angDiff(e.angle, Math.atan2(e.vy, e.vx)) * Math.min(1, dt * 10);
+    e.av = lerp(e.av || 0, angDiff(prevA, e.angle) / Math.max(dt, 1e-4), Math.min(1, dt * 12));
     if (!e.fly && !e.under) collidePillars(e);
     clampArena(e);
     e.shieldFlash -= dt;
@@ -1313,6 +1377,7 @@
       const push = rr - d;
       e.x -= ux * push; e.y -= uy * push;
       if (state === 'play' && e.spawnT <= 0 && e.atkCd <= 0) {
+        e.biteT = 0.18;
         hurtPlayer(e.dmg, e);
         e.atkCd = 0.7;
         if (e.type === 'boomer') { killEnemy(e); return; }
@@ -1347,6 +1412,7 @@
     if (e.dead || e.under) return;
     e.hp -= dmg;
     e.flash = 0.06;
+    e.hitT = 0.12;
     const m = ET[e.type].mass;
     e.kx += (kx * knock) / m; e.ky += (ky * knock) / m;
     blood(e.x, e.y, ET[e.type].blood, 3, 180, Math.atan2(ky, kx));
@@ -1372,6 +1438,8 @@
       part({ kind: 'gib', x: e.x, y: e.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.3, 0.7), size: rand(2.5, 5) * (e.r / 14), color: i % 2 ? T.dark : T.body, splat: T.blood, rot: rand(0, TAU), vr: rand(-15, 15), drag: 4 });
     }
     splat(e.x, e.y, e.r * 1.6, T.blood, 8);
+    if (e.type !== 'egg' && e.type !== 'boomer') stampCorpse(e);
+    part({ kind: 'flash', x: e.x, y: e.y, vx: 0, vy: 0, life: 0.08, size: e.r * 2.2, color: T.blood, glow: true });
     A.sfx('die');
     shake = Math.min(30, shake + e.r / 14);
 
@@ -1837,6 +1905,7 @@
     snarePulse = Math.max(0, snarePulse - rdt * 5);
     hurtFlash = Math.max(0, hurtFlash - rdt * 2.2);
     shake *= Math.exp(-rdt * 9);
+    camKick.x *= Math.exp(-rdt * 14); camKick.y *= Math.exp(-rdt * 14);
     for (const v of vents) v.pulse = Math.max(0, v.pulse - rdt * 2.5);
 
     // keep the game alive even if Web Audio is unavailable or blocked
@@ -1997,6 +2066,7 @@
         damageEnemy(e, b.kind === 'flame' ? b.dmg * (0.5 + b.life / b.max) : b.dmg, b.vx / sp, b.vy / sp, b.knock);
         if (b.kind === 'flame') { e.burn = Math.max(e.burn, 1.6); b.hits.add(e); continue; }
         if (b.kind === 'saw') { b.hits.add(e); continue; }
+        part({ kind: 'flash', x: b.x, y: b.y, vx: 0, vy: 0, life: 0.05, size: 10 + b.r * 2, color: '#ffffff', glow: true });
         if (b.pierce > 0) { b.pierce--; (b.hits || (b.hits = new Set())).add(e); }
         else { b.dead = true; break; }
       }
@@ -2031,6 +2101,7 @@
   }
 
   // ======================================================================= render: world
+  let curlLegs = false;
   function legs(n, r, len, ph, col, lw, spreadX) {
     ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath();
@@ -2038,14 +2109,34 @@
       for (let i = 0; i < n; i++) {
         const f = n === 1 ? 0.5 : i / (n - 1);
         const bx = lerp(spreadX, -spreadX, f), by = s * r * 0.3;
-        const sw = Math.sin(ph + i * 2.2 + (s > 0 ? Math.PI : 0)) * 0.35;
-        const base = lerp(0.6, -0.6, f) + sw;
-        const a1 = s * (Math.PI / 2 - base);
-        const a2 = s * (Math.PI / 2 - base * 1.7);
-        const kx = bx + Math.cos(a1) * len * 0.55, ky = by + Math.sin(a1) * len * 0.55;
+        let a1, a2, L1 = len * 0.55, L2 = len * 0.6;
+        if (curlLegs) {
+          const base = lerp(0.9, -0.2, f);
+          a1 = s * (Math.PI / 2 - base); a2 = a1 + s * 2.2; L1 *= 0.65; L2 *= 0.55;
+        } else {
+          // alternating tripod gait: one tripod plants while the other swings forward, lifted
+          const cyc = ph + ((i + (s > 0 ? 1 : 0)) % 2 ? Math.PI : 0);
+          const lift = Math.max(0, Math.cos(cyc));
+          const base = lerp(0.6, -0.6, f) + Math.sin(cyc) * 0.42;
+          a1 = s * (Math.PI / 2 - base);
+          a2 = s * (Math.PI / 2 - base * 1.7) - s * lift * 0.5;
+          L2 *= 1 - lift * 0.25;
+        }
+        const kx = bx + Math.cos(a1) * L1, ky = by + Math.sin(a1) * L1;
         ctx.moveTo(bx, by); ctx.lineTo(kx, ky);
-        ctx.lineTo(kx + Math.cos(a2) * len * 0.6, ky + Math.sin(a2) * len * 0.6);
+        ctx.lineTo(kx + Math.cos(a2) * L2, ky + Math.sin(a2) * L2);
       }
+    }
+    ctx.stroke();
+  }
+  // rotate a body section (abdomen, tail) around a joint
+  function seg(jx, rot, fn) { ctx.save(); ctx.translate(jx, 0); ctx.rotate(rot); ctx.translate(-jx, 0); fn(); ctx.restore(); }
+  const easeOutBack = t => { const c = 1.9; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+  function mandibles(r, x0, open, col, lw) {
+    ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.beginPath();
+    for (const sy of [-1, 1]) {
+      ctx.moveTo(x0, sy * r * 0.2);
+      ctx.quadraticCurveTo(x0 + r * 0.45, sy * r * (0.3 + open * 0.5), x0 + r * 0.38, sy * r * (0.02 + open * 0.45));
     }
     ctx.stroke();
   }
@@ -2062,7 +2153,7 @@
   function drawEnemy(e) {
     const T = ET[e.type];
     const r = e.r;
-    const sc = e.spawnT > 0 ? 1 - e.spawnT / 0.45 : 1;
+    const sc = e.spawnT > 0 ? Math.max(0.05, easeOutBack(1 - e.spawnT / 0.45)) : 1;
     ctx.save();
     ctx.translate(e.x, e.y);
     if (e.under) {
@@ -2076,11 +2167,31 @@
       ctx.restore();
       return;
     }
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    if (e.fly) ell(14, 22, r * 0.9 * sc, r * 0.6 * sc);
-    else ell(4, 6, r * 1.15 * sc, r * 0.85 * sc);
-    ctx.rotate(e.angle);
-    ctx.scale(sc, sc);
+    const alt = e.fly && !e.corpse ? 1 + Math.sin(e.t * 5 + e.phase) * 0.3 : 0;
+    if (!e.corpse) {
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      if (e.fly) ell(10 + alt * 6, 16 + alt * 8, r * 0.9 * sc * (1.1 - alt * 0.15), r * 0.6 * sc * (1.1 - alt * 0.15));
+      else ell(4, 6, r * 1.15 * sc, r * 0.85 * sc);
+    }
+    const mv = e.corpse ? 0 : clamp(Math.hypot(e.vx, e.vy) / Math.max(40, e.speed), 0, 1.6);
+    if (alt) ctx.translate(0, -alt * 4);
+    ctx.rotate(e.angle + Math.sin(e.walk) * 0.07 * Math.min(1, mv));
+    let sx = 1, sy = 1;
+    if (!e.corpse) {
+      if (e.st === 'lunge' || e.st === 'charge' || e.st === 'dive' || e.st === 'leap') { sx = 1.28; sy = 0.8; }            // stretch at speed
+      else if (e.st === 'wind' || e.st === 'emerge' || e.st === 'barrage' || (e.type === 'boomer' && e.fuse > 0)) {          // anticipation crouch + tremble
+        const tr = Math.sin(e.t * 50) * 0.04; sx = 0.84 + tr; sy = 1.14 - tr;
+      }
+      if (e.hitT > 0) { const k = e.hitT / 0.12; sx *= 1 - 0.2 * k; sy *= 1 + 0.16 * k; }                                   // flinch
+      const br = Math.sin(e.t * (e.type === 'boomer' ? 6 : 3.5) + e.phase) * (e.type === 'boomer' ? 0.05 : 0.025);            // breathing
+      sx *= 1 + br; sy *= 1 - br * 0.6;
+      if (e.biteT > 0) ctx.translate(r * 0.4 * Math.sin((1 - e.biteT / 0.18) * Math.PI), 0);                                // bite lunge
+    }
+    ctx.scale(sc * sx, sc * sy);
+    // abdomens swing with the gait and lag behind turns
+    const tail = e.corpse ? (e.phase > Math.PI ? 0.4 : -0.4) : clamp(-(e.av || 0) * 0.1, -0.55, 0.55) + Math.sin(e.walk) * 0.14 * Math.min(1, mv);
+    const chomp = e.near && !e.corpse ? 0.35 + Math.sin(e.t * 28) * 0.3 : 0.1;
+    curlLegs = !!e.corpse;
     if (e.type === 'phantom') ctx.globalAlpha = phantomAlpha(e);
     const fl = e.flash > 0;
     const body = fl ? '#ffffff' : T.body, dk = fl ? '#d8d8d8' : T.dark;
@@ -2119,10 +2230,12 @@
       case 'hatcher': {
         legs(4, r, r * 1.15, ph, dk, 4, r * 0.4);
         const sw = 1 + Math.sin(e.t * 3) * 0.05 + (e.cd < 0.6 ? (0.6 - Math.max(0, e.cd)) * 0.25 : 0);
+        seg(-r * 0.05, tail * 0.6, () => {
         ctx.fillStyle = dk; ell(-r * 0.45, 0, r * 1.1 * sw, r * 0.95 * sw);
         ctx.fillStyle = fl ? '#fff' : '#b8a848'; ell(-r * 0.5, 0, r * 0.95 * sw, r * 0.8 * sw);
         ctx.fillStyle = fl ? '#ddd' : '#e8dc90';
         for (let i = 0; i < 6; i++) circ(-r * 0.5 + Math.cos(i * 1.05 + 0.3) * r * 0.45 * sw, Math.sin(i * 1.05 + 0.3) * r * 0.4 * sw, r * 0.15);
+        });
         ctx.fillStyle = body; ell(r * 0.5, 0, r * 0.38, r * 0.4);
         ctx.fillStyle = dk; ell(r * 0.85, 0, r * 0.25, r * 0.22);
         break;
@@ -2142,56 +2255,63 @@
         ctx.fillStyle = dk; circ(0, 0, r);
         ctx.fillStyle = body; circ(-r * 0.1, 0, r * 0.8);
         ctx.fillStyle = dk; ell(r * 0.8, 0, r * 0.35, r * 0.3);
+        mandibles(r, r * 0.95, chomp, dk, 1.2);
         break;
       }
       case 'wasp': {
-        const flap = Math.sin(e.t * 70) * 0.35;
+        const flap = e.corpse ? -0.4 : Math.sin(e.t * 70) * 0.35;
         ctx.fillStyle = 'rgba(220,240,255,0.35)';
         for (const sy of [-1, 1]) {
           ctx.save(); ctx.rotate(sy * (1.2 + flap)); ell(r * 0.9, 0, r * 1.1, r * 0.35); ctx.restore();
           ctx.save(); ctx.rotate(sy * (1.9 + flap)); ell(r * 0.7, 0, r * 0.8, r * 0.28); ctx.restore();
         }
-        ctx.fillStyle = dk; ell(-r * 0.75, 0, r * 0.85, r * 0.5);
-        ctx.fillStyle = body;
-        for (let i = 0; i < 3; i++) ell(-r * 0.45 - i * r * 0.32, 0, r * 0.14, r * 0.48);
-        ctx.fillStyle = dk; ctx.beginPath(); ctx.moveTo(-r * 1.55, 0); ctx.lineTo(-r * 2.1, 0); ctx.lineTo(-r * 1.55, r * 0.12); ctx.fill();
+        seg(-r * 0.15, e.st === 'dive' ? 0 : tail + Math.sin(e.t * 6) * 0.15, () => {
+          if (e.st === 'dive') ctx.scale(0.75, 1);
+          ctx.fillStyle = dk; ell(-r * 0.75, 0, r * 0.85, r * 0.5);
+          ctx.fillStyle = body;
+          for (let i = 0; i < 3; i++) ell(-r * 0.45 - i * r * 0.32, 0, r * 0.14, r * 0.48);
+          ctx.fillStyle = dk; ctx.beginPath(); ctx.moveTo(-r * 1.55, 0); ctx.lineTo(-r * 2.1, 0); ctx.lineTo(-r * 1.55, r * 0.12); ctx.fill();
+        });
         ctx.fillStyle = body; ell(r * 0.2, 0, r * 0.45, r * 0.4);
         ctx.fillStyle = dk; ell(r * 0.7, 0, r * 0.32, r * 0.3);
         break;
       }
       case 'crawler': {
         legs(3, r, r * 1.5, ph, dk, 2.5, r * 0.5);
-        ctx.fillStyle = dk; ell(-r * 0.75, 0, r * 0.8, r * 0.62);
-        ctx.fillStyle = body; ell(-r * 0.7, 0, r * 0.68, r * 0.5);
+        seg(-r * 0.2, tail, () => {
+          ctx.fillStyle = dk; ell(-r * 0.75, 0, r * 0.8, r * 0.62);
+          ctx.fillStyle = body; ell(-r * 0.7, 0, r * 0.68, r * 0.5);
+          ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1.5;
+          for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(-r * 0.35 - i * r * 0.32, 0, r * 0.45, -1, 1); ctx.stroke(); }
+        });
         ctx.fillStyle = dk; ell(r * 0.1, 0, r * 0.6, r * 0.55);
         ctx.fillStyle = body; ell(r * 0.1, 0, r * 0.48, r * 0.43);
         ctx.fillStyle = dk; ell(r * 0.78, 0, r * 0.42, r * 0.38);
-        ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1.5;
-        for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(-r * 0.35 - i * r * 0.32, 0, r * 0.45, -1, 1); ctx.stroke(); }
-        ctx.strokeStyle = body; ctx.lineWidth = 2; ctx.beginPath();
-        ctx.moveTo(r, -r * 0.2); ctx.quadraticCurveTo(r * 1.45, -r * 0.32, r * 1.35, -r * 0.02);
-        ctx.moveTo(r, r * 0.2); ctx.quadraticCurveTo(r * 1.45, r * 0.32, r * 1.35, r * 0.02);
-        ctx.stroke();
+        mandibles(r, r * 0.98, chomp, body, 2);
         break;
       }
       case 'leaper': {
-        if (e.st === 'wind') ctx.scale(0.82, 1.12);
         legs(2, r, r * 2.3, ph * 0.7, dk, 2.5, r * 0.55);
-        ctx.fillStyle = dk; ell(-r * 0.6, 0, r * 0.9, r * 0.45);
-        ctx.fillStyle = body; ell(-r * 0.55, 0, r * 0.75, r * 0.34);
+        seg(-r * 0.1, tail * 1.2, () => {
+          ctx.fillStyle = dk; ell(-r * 0.6, 0, r * 0.9, r * 0.45);
+          ctx.fillStyle = body; ell(-r * 0.55, 0, r * 0.75, r * 0.34);
+          ctx.strokeStyle = body; ctx.lineWidth = 1.5; ctx.beginPath();
+          ctx.moveTo(-r * 1.4, 0); ctx.quadraticCurveTo(-r * 1.8, Math.sin(e.t * 9) * r * 0.4, -r * 2.1, Math.sin(e.t * 9 - 1) * r * 0.5); ctx.stroke();
+        });
         ctx.fillStyle = body; ell(r * 0.35, 0, r * 0.55, r * 0.4);
         ctx.fillStyle = dk; ell(r * 0.95, 0, r * 0.35, r * 0.3);
-        ctx.strokeStyle = body; ctx.lineWidth = 1.5; ctx.beginPath();
-        ctx.moveTo(-r * 1.4, 0); ctx.lineTo(-r * 2, Math.sin(e.t * 9) * r * 0.4); ctx.stroke();
+        mandibles(r * 0.8, r * 1.15, chomp, body, 1.5);
         break;
       }
       case 'spitter': {
         legs(4, r, r * 1.25, ph, dk, 2.5, r * 0.5);
         const puff = 1 + Math.sin(e.t * 5) * 0.06 + (0.4 - clamp(e.cd, 0, 0.4)) * 0.4;
+        seg(-r * 0.05, tail * 0.7, () => {
         ctx.fillStyle = dk; ell(-r * 0.55, 0, r * 1.0 * puff, r * 0.85 * puff);
         ctx.fillStyle = fl ? '#fff' : '#a659d8'; ell(-r * 0.6, 0, r * 0.82 * puff, r * 0.68 * puff);
         ctx.fillStyle = 'rgba(0,0,0,0.25)';
         for (let i = 0; i < 4; i++) circ(-r * 0.6 + Math.cos(i * 1.7) * r * 0.4, Math.sin(i * 1.7) * r * 0.35, r * 0.12);
+        });
         ctx.fillStyle = body; ell(r * 0.45, 0, r * 0.45, r * 0.4);
         ctx.fillStyle = dk; ell(r * 0.85, 0, r * 0.28, r * 0.22);
         break;
@@ -2257,10 +2377,12 @@
       case 'titan': {
         legs(5, r, r * 1.35, ph, dk, 9, r * 0.6);
         const sw = 1 + Math.sin(e.t * 2) * 0.04 + (e.st === 'barrage' ? 0.06 : 0);
+        seg(-r * 0.05, tail * 0.5, () => {
         ctx.fillStyle = dk; ell(-r * 0.6, 0, r * 1.15 * sw, r * 0.95 * sw);
         ctx.fillStyle = fl ? '#fff' : '#c8a848'; ell(-r * 0.65, 0, r * 1.0 * sw, r * 0.82 * sw);
         ctx.fillStyle = fl ? '#ddd' : '#f0e4a0';
         for (let i = 0; i < 9; i++) circ(-r * 0.65 + Math.cos(i * 0.7) * r * 0.55 * sw, Math.sin(i * 0.7) * r * 0.5 * sw, r * 0.13);
+        });
         ctx.fillStyle = dk; ell(r * 0.35, 0, r * 0.62, r * 0.6);
         ctx.fillStyle = body; ell(r * 0.35, 0, r * 0.52, r * 0.5);
         ctx.strokeStyle = dk; ctx.lineWidth = 4;
@@ -2287,10 +2409,12 @@
       }
       case 'queen': {
         legs(4, r, r * 1.5, ph, dk, 7, r * 0.6);
-        ctx.fillStyle = dk; ell(-r * 1.15, 0, r * 0.95, r * 0.78);
-        ctx.fillStyle = fl ? '#fff' : '#c43a8a'; ell(-r * 1.15, 0, r * 0.82, r * 0.66);
-        ctx.strokeStyle = dk; ctx.lineWidth = 3;
-        for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(-r * 0.7 - i * r * 0.3, 0, r * 0.62, Math.PI * 0.65, Math.PI * 1.35); ctx.stroke(); }
+        seg(-r * 0.4, tail * 0.6, () => {
+          ctx.fillStyle = dk; ell(-r * 1.15, 0, r * 0.95, r * 0.78);
+          ctx.fillStyle = fl ? '#fff' : '#c43a8a'; ell(-r * 1.15, 0, r * 0.82, r * 0.66);
+          ctx.strokeStyle = dk; ctx.lineWidth = 3;
+          for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(-r * 0.7 - i * r * 0.3, 0, r * 0.62, Math.PI * 0.65, Math.PI * 1.35); ctx.stroke(); }
+        });
         ctx.fillStyle = dk; ell(-r * 0.1, 0, r * 0.7, r * 0.62);
         ctx.fillStyle = body; ell(-r * 0.1, 0, r * 0.6, r * 0.52);
         ctx.fillStyle = dk; ell(r * 0.65, 0, r * 0.45, r * 0.5);
@@ -2315,7 +2439,7 @@
       ctx.beginPath(); ctx.ellipse(-r * 0.2, 0, r * 1.15, r * 0.9, 0, 0, TAU); ctx.stroke();
     }
     ctx.restore();
-    if (!T.boss && e.hp < e.maxHp && (e.maxHp > 120 || e.elite)) {
+    if (!e.corpse && !T.boss && e.hp < e.maxHp && (e.maxHp > 120 || e.elite)) {
       const w = r * 2;
       ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(e.x - w / 2, e.y - r - 12, w, 4);
       ctx.fillStyle = e.elite ? '#ffd23a' : '#ff5a3a'; ctx.fillRect(e.x - w / 2, e.y - r - 12, w * Math.max(0, e.hp / e.maxHp), 4);
@@ -2331,17 +2455,23 @@
   }
 
   function drawGun(w, L, spin) {
-    ctx.fillStyle = '#2a2d33';
+    const p = player;
+    const hot = (w.id === 'smg' || w.id === 'minigun') ? p.heat : 0;
+    ctx.fillStyle = hot > 0.3 ? `rgb(${Math.round(42 + hot * 120)},${Math.round(45 + hot * 25)},${Math.round(51 - hot * 20)})` : '#2a2d33';
     switch (w.id) {
-      case 'shotgun':
-        ctx.fillRect(4, 1, L, 8); ctx.fillStyle = '#5a3a22'; ctx.fillRect(12, 0, 8, 10); break;
+      case 'shotgun': {
+        ctx.fillRect(4, 1, L, 8);
+        const pump = p.pumpT > 0 ? Math.sin((1 - p.pumpT / 0.4) * Math.PI) * 7 : 0;
+        ctx.fillStyle = '#5a3a22'; ctx.fillRect(12 - pump, 0, 8, 10);
+        break;
+      }
       case 'rocket':
         ctx.fillStyle = '#4a5a3a'; ctx.fillRect(-8, -1, L + 8, 12); ctx.fillStyle = '#2a2d33'; ctx.fillRect(L - 4, -2, 6, 14); break;
       case 'flamer':
         ctx.fillRect(4, 2, L, 6); ctx.fillStyle = '#8a3a1a'; ctx.fillRect(-2, 0, 10, 10); ctx.fillStyle = '#444'; ctx.fillRect(L, 1, 4, 8); break;
       case 'rail':
         ctx.fillRect(2, 1, L, 8);
-        ctx.fillStyle = w.color; for (let i = 0; i < 3; i++) ctx.fillRect(10 + i * 7, 0, 3, 10);
+        { const ch = clamp(1 - p.fireCd * w.rate, 0, 1); ctx.fillStyle = w.color; for (let i = 0; i < 3; i++) { ctx.globalAlpha = ch > i / 3 ? 1 : 0.25; ctx.fillRect(10 + i * 7, 0, 3, 10); } ctx.globalAlpha = 1; }
         break;
       case 'minigun':
         ctx.fillRect(0, -1, 14, 12);
@@ -2349,7 +2479,7 @@
         break;
       case 'saw':
         ctx.fillRect(2, 0, L - 4, 10);
-        ctx.fillStyle = '#c8ff3a'; circ(L - 2, 5, 6); ctx.fillStyle = '#2a2d33'; circ(L - 2, 5, 2);
+        if (p.fireCd < 0.12 || !(mouse.down || pad.fire)) { ctx.fillStyle = '#c8ff3a'; circ(L - 2, 5, 6); ctx.fillStyle = '#2a2d33'; circ(L - 2, 5, 2); }
         break;
       case 'arc':
         ctx.fillRect(2, 1, L - 6, 8);
@@ -2366,20 +2496,29 @@
     const p = player;
     if (state === 'dying' || state === 'over') return;
     const G = p.gear;
+    const spd = Math.hypot(p.vx, p.vy), mvk = Math.min(1, spd / 300);
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.fillStyle = 'rgba(0,0,0,0.4)'; ell(3, 5, 17 + G.armor, 14 + G.armor);
+    if (p.hitT > 0) ctx.translate(rand(-2.5, 2.5), rand(-2.5, 2.5));
     if (p.invuln > 0 && p.dash <= 0 && p.aegis <= 0 && Math.floor(gameTime * 30) % 2) ctx.globalAlpha = 0.45;
-    ctx.rotate(p.angle);
-    const st = Math.sin(p.walk) * 6;
-    // boots: servo boots get plating and yellow servos
+
+    // legs: face the direction of travel and stride
+    ctx.save();
+    ctx.rotate(p.legA);
+    const stride = Math.sin(p.walk) * 7 * mvk;
     ctx.fillStyle = G.boots ? '#3a3320' : '#1b2a30';
-    ctx.fillRect(-4 + st, -11, 10 + G.boots, 7); ctx.fillRect(-4 - st, 4, 10 + G.boots, 7);
-    if (G.boots) {
-      ctx.fillStyle = '#ffd23a';
-      ctx.fillRect(-4 + st, -9, 2 + G.boots, 3); ctx.fillRect(-4 - st, 6, 2 + G.boots, 3);
-    }
-    // backpack, with vital-core cells and the shield emitter
+    ctx.fillRect(-4 + stride, -10, 10 + G.boots, 7); ctx.fillRect(-4 - stride, 3, 10 + G.boots, 7);
+    if (G.boots) { ctx.fillStyle = '#ffd23a'; ctx.fillRect(-4 + stride, -8, 2 + G.boots, 3); ctx.fillRect(-4 - stride, 5, 2 + G.boots, 3); }
+    ctx.restore();
+
+    // upper body: aims, sways with the stride, leans into a dash, shoved back by recoil
+    ctx.rotate(p.angle + Math.sin(p.walk) * 0.09 * mvk + p.kickA);
+    if (p.dash > 0) ctx.scale(1.2, 0.85);
+    const breathe = 1 + Math.sin(gameTime * 3) * 0.018 * (1 - mvk);
+    const bob = 1 + Math.abs(Math.sin(p.walk)) * 0.04 * mvk;
+    ctx.scale(breathe * bob, breathe * bob);
+    ctx.translate(-p.recoil * 0.45, 0);
     ctx.fillStyle = '#24343a'; ctx.fillRect(-18, -9, 9, 18);
     if (G.vital) {
       ctx.fillStyle = '#0e2e18'; ctx.fillRect(-21, -10, 6, 20);
@@ -2391,7 +2530,6 @@
       ctx.fillStyle = '#5ad1ff'; circ(-12, 0, 1.5 + G.shield * 0.7);
     }
     if (WEAPONS[p.cur].id === 'flamer') { ctx.fillStyle = '#8a3a1a'; circ(-15, -5, 5); circ(-15, 5, 5); }
-    // torso; armour level 2 adds a chest plate, level 3 gold trim
     ctx.fillStyle = '#2e5f6a'; ell(-1, 0, 10, 15);
     ctx.fillStyle = '#3f8a94'; ell(0, 0, 7, 11);
     if (G.armor >= 2) {
@@ -2400,22 +2538,26 @@
       for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.moveTo(-3, i * 5); ctx.lineTo(6, i * 5); ctx.stroke(); }
       if (G.armor >= 3) { ctx.strokeStyle = '#ffd23a'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(1, 0, 7.5, 12, 0, 0, TAU); ctx.stroke(); }
     }
+    // gun (dips and comes back up on weapon swap)
     const w = WEAPONS[p.cur];
+    ctx.save();
+    if (p.swapT > 0) { const k = p.swapT / 0.28; ctx.translate(-k * 6, k * 5); ctx.rotate(k * 0.9); }
     drawGun(w, w.len - p.recoil, Math.floor(gameTime * 40 * p.spin));
-    ctx.fillStyle = '#1f2b30'; circ(8, 6, 3.5); circ(15, 5, 3);
-    // shoulder pads grow with armour
-    const pw = 5 + G.armor * 1.3, ph = 4 + G.armor * 0.7, po = 12 + G.armor * 0.6;
+    ctx.fillStyle = '#1f2b30'; circ(8 - p.recoil * 0.3, 6, 3.5); circ(15 - p.recoil * 0.5, 5, 3);
+    ctx.restore();
+    // shoulders roll opposite to the stride
+    const pw = 5 + G.armor * 1.3, ph = 4 + G.armor * 0.7, po = 12 + G.armor * 0.6, roll = Math.sin(p.walk) * 1.6 * mvk;
     ctx.fillStyle = G.armor >= 3 ? '#c8b060' : G.armor ? '#9aa4b8' : '#4aa3ad';
-    ell(0, -po, pw, ph); ell(0, po, pw, ph);
+    ell(roll, -po, pw, ph); ell(-roll, po, pw, ph);
     if (G.armor) {
       ctx.strokeStyle = '#3a4252'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.ellipse(0, -po, pw, ph, 0, 0, TAU); ctx.ellipse(0, po, pw, ph, 0, 0, TAU); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(roll, -po, pw, ph, 0, 0, TAU); ctx.ellipse(-roll, po, pw, ph, 0, 0, TAU); ctx.stroke();
     }
-    // helmet: armoured from level 1, red crest at level 3
     ctx.fillStyle = '#1c2a2f'; circ(1, 0, 7.5);
     ctx.fillStyle = G.armor ? '#5a6478' : '#3c7c86'; circ(0, 0, 6.5);
     if (G.armor >= 3) { ctx.fillStyle = '#ff3a4a'; ctx.fillRect(-8, -1.3, 10, 2.6); }
     ctx.fillStyle = '#7ff6ff'; ctx.fillRect(3, -4, 3, 8);
+    if (p.hitT > 0) { ctx.globalAlpha = p.hitT * 2.5; ctx.fillStyle = '#ff2a3a'; ell(0, 0, 12, 16); ctx.globalAlpha = 1; }
     ctx.restore();
 
     // sentry drones
@@ -2429,6 +2571,33 @@
       ctx.fillStyle = '#ff7ad8'; circ(0, 0, 2);
       ctx.restore();
     }
+  }
+
+  const FLASH = { pistol: [16, 3], smg: [12, 2], shotgun: [30, 5], rifle: [20, 2], rocket: [20, 4], rail: [26, 6], minigun: [15, 3], saw: [10, 2], arc: [16, 4], flamer: [0, 0] };
+  function drawWeaponFx(p) {
+    const w = WEAPONS[p.cur], m = muzzlePos(), a = p.angle + p.kickA;
+    if (p.muzzle > 0 && w.kind !== 'flame') {
+      const [len, prongs] = FLASH[w.id];
+      glow(w.color, m.x, m.y, len * 1.8, 0.9);
+      ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(a + p.flashRot * 0.3);
+      ctx.fillStyle = w.color; ctx.globalAlpha = 0.9;
+      // star-shaped flash: long forward prong, shorter side prongs
+      ctx.beginPath();
+      const pts = prongs * 2 + 2;
+      for (let i = 0; i < pts; i++) {
+        const t = (i / pts) * TAU, fwd = Math.max(0, Math.cos(t));
+        const rr = i % 2 ? len * 0.18 : len * (0.35 + fwd * fwd * 0.9) * rand(0.8, 1.15);
+        ctx.lineTo(Math.cos(t) * rr * (w.id === 'shotgun' ? 1.1 : 1), Math.sin(t) * rr * (w.id === 'shotgun' ? 1.5 : 1));
+      }
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1; ctx.fillStyle = '#ffffff'; circ(0, 0, len * 0.18);
+      ctx.restore();
+      if (w.kind === 'rocket') glow('#ff9a3a', p.x - Math.cos(a) * 22, p.y - Math.sin(a) * 22, 30, 0.9); // backblast
+    }
+    if (w.id === 'flamer') glow(Math.random() < 0.5 ? '#5ab0ff' : '#ff9a2e', m.x, m.y, 7 + Math.random() * 3, 0.9); // pilot light
+    if (p.heat > 0.15) glow('#ff6a1a', m.x - Math.cos(a) * 8, m.y - Math.sin(a) * 8, 8 + p.heat * 10, p.heat * 0.8);
+    if (w.id === 'rail') { const ch = clamp(1 - p.fireCd * w.rate, 0, 1); glow(w.color, m.x - Math.cos(a) * 14, m.y - Math.sin(a) * 14, 8 + ch * 10, 0.25 + ch * 0.6); }
+    if (w.id === 'arc' && Math.random() < 0.15) sparks(m.x, m.y, w.color, 1, 120);
   }
 
   function drawPlayerGlow() {
@@ -2648,7 +2817,7 @@
           break;
         case 'shell':
           ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.rot);
-          ctx.fillStyle = q.color; ctx.globalAlpha = Math.min(1, f * 3); ctx.fillRect(-2.5, -1, 5, 2);
+          ctx.fillStyle = q.color; ctx.globalAlpha = Math.min(1, f * 3); ctx.fillRect(-2.5 * (q.size || 1), -1 * (q.size || 1), 5 * (q.size || 1), 2 * (q.size || 1));
           ctx.restore();
           break;
         case 'smoke':
@@ -2762,7 +2931,7 @@
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
     shX = (Math.random() * 2 - 1) * shake * 0.5 * shakeMul();
     shY = (Math.random() * 2 - 1) * shake * 0.5 * shakeMul();
-    const tx = W / 2 + shX - cam.x * VIEW, ty = H / 2 + shY - cam.y * VIEW;
+    const tx = W / 2 + shX + camKick.x * VIEW - cam.x * VIEW, ty = H / 2 + shY + camKick.y * VIEW - cam.y * VIEW;
     const setWorld = () => ctx.setTransform(DPR * VIEW, 0, 0, DPR * VIEW, DPR * tx, DPR * ty);
     const x0 = cam.x - W / 2 / VIEW - 60, x1 = cam.x + W / 2 / VIEW + 60;
     const y0 = cam.y - H / 2 / VIEW - 60, y1 = cam.y + H / 2 / VIEW + 60;
@@ -2931,13 +3100,7 @@
     drawPlayerGlow();
     if (player && state === 'play') {
       const p = player;
-      if (p.muzzle > 0) {
-        const m = muzzlePos(), w = WEAPONS[p.cur];
-        if (w.kind !== 'flame') {
-          glow(w.color, m.x, m.y, 34, 0.95);
-          glow('#ffffff', m.x, m.y, 12, 1);
-        }
-      }
+      drawWeaponFx(p);
       const vx = p.x + Math.cos(p.angle) * 4, vy = p.y + Math.sin(p.angle) * 4;
       glow('#7ff6ff', vx, vy, 10, 0.6);
       if (p.overdrive > 0) glow('#ff2a4a', p.x, p.y, 44, 0.3 + Math.sin(gameTime * 20) * 0.1);
