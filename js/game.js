@@ -329,6 +329,15 @@
   ];
   // which wave's carrier drops which new weapon (index into WEAPONS)
   const UNLOCK = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 8, 8: 6, 9: 9, 10: 7 };
+  // the weapon wave n's carrier drops: that wave's own unlock, or - once it's owned (or the
+  // wave has none) - the earliest weapon from an earlier wave the player missed. A weapon
+  // still lying on the floor doesn't count as missed, so it's never dropped twice.
+  function carrierWeapon(n) {
+    const want = i => !player.ws[i].owned && !pickups.some(pk => pk.kind === 'weapon' && pk.wi === i && !pk.dead);
+    if (UNLOCK[n] !== undefined && want(UNLOCK[n])) return UNLOCK[n];
+    for (let w = 2; w < n; w++) if (UNLOCK[w] !== undefined && want(UNLOCK[w])) return UNLOCK[w];
+    return undefined;
+  }
 
   const ET = {
     crawler:  { name: 'CRAWLER',  hp: 30,  speed: 185, r: 13, dmg: 10, score: 10,  mass: 1,   first: 1,  body: '#3f8f2a', dark: '#1d4513', eye: '#ff3030', blood: '#7bd12a', desc: 'FAST. HUNGRY. MANY.' },
@@ -1750,8 +1759,8 @@
     }
     if (state !== 'play') return;
     if (e.elite) {
-      const wi = UNLOCK[wave];
-      if (wi !== undefined && !player.ws[wi].owned) spawnPickup('weapon', e.x, e.y, wi);
+      const wi = carrierWeapon(wave);
+      if (wi !== undefined) spawnPickup('weapon', e.x, e.y, wi);
       else spawnPickup('upgrade', e.x, e.y);
     } else if (!T.boss) {
       const mul = e.type === 'brute' ? 2.5 : 1;
@@ -1926,7 +1935,7 @@
     if (boss) { const bt = ET[ARENA_BOSS[Math.max(0, ARENAS.indexOf(arena))]]; banner(`WAVE ${n}`, bt.intro, bt.color, 2.8); }
     else if (newType) banner(`WAVE ${n}`, `NEW THREAT: ${ET[newType].name}`, '#ff4f6d', 2.8, ET[newType].desc);
     else banner(`WAVE ${n}`, choose(TAUNTS), '#ff4f6d', 2.4);
-    if (UNLOCK[n] !== undefined && !boss) floatText(player.x, player.y - 40, 'A GOLDEN CARRIER HAS A WEAPON', '#ffd23a', 9);
+    if (carrierWeapon(n) !== undefined && !boss) floatText(player.x, player.y - 40, 'A GOLDEN CARRIER HAS A WEAPON', '#ffd23a', 9);
     A.sfx('alarm');
     music(boss ? 'boss' : 'wave', intensityFor(n), boss ? 168 : bpmFor(n));
   }

@@ -6,6 +6,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8088"],
       "port": 8088
+    },
+    {
+      "name": "protocol88-alt",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8089"],
+      "port": 8089
     }
   ]
 }
