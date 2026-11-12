@@ -41,4 +41,4 @@ Options → Soundtrack switches between STUDIO and SYNTH.
 ## Testing tools
 
 - `?bot` — watch an autoplay bot. `?bot&speed=8&runs=4` simulates four runs at 8× and logs the waves it died on.
-- `?debug` — exposes `window.__p88` (god mode, skip waves, spawn aliens, give gear, switch arenas, zoom).
+- `?debug` — exposes `window.__p88` (god mode, skip waves, spawn aliens, give gear or perks with `gear(key)`, force a supply drop with `drop()`, switch arenas, zoom).

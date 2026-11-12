@@ -381,6 +381,28 @@
     nova:      { name: 'NOVA BLAST', color: '#ff7ad8', dur: 0 },
   };
 
+  // perks: behaviour-changing upgrades offered in supply drops next to gear. desc[i] is what level i+1 gives.
+  // tags drive synergy - drops favour perks that share a tag with ones you own - and some perks need a partner.
+  const PERKS = {
+    ignite:    { name: 'INCENDIARY ROUNDS', max: 2, color: '#ff7a1a', icon: 'I', tags: ['fire'],          desc: ['HITS CAN IGNITE ALIENS', 'IGNITE CHANCE DOUBLED'] },
+    trail:     { name: 'AFTERBURNER',       max: 2, color: '#ff9a3a', icon: '~', tags: ['fire', 'dash'],  desc: ['DASH LEAVES A FIRE TRAIL', 'WIDER, LONGER TRAIL'] },
+    pyre:      { name: 'PYROMANIAC',        max: 2, color: '#ff5a2a', icon: 'P', tags: ['fire', 'boom'],  desc: ['BURNING ALIENS EXPLODE', 'BIGGER DEATH BLASTS'],
+                 needs: p => p.perk.ignite > 0 || p.perk.trail > 0, needName: 'A FIRE PERK' },
+    chain:     { name: 'CHAIN REACTION',    max: 2, color: '#ffcf3a', icon: 'C', tags: ['boom'],          desc: ['KILLS MAY DETONATE', 'DETONATE TWICE AS OFTEN'] },
+    blast:     { name: 'KINETIC DASH',      max: 2, color: '#7ae0ff', icon: 'K', tags: ['dash', 'boom'],  desc: ['DASH ENDS IN A SHOCKWAVE', 'BIGGER, ERASES SPIT'] },
+    ricochet:  { name: 'RICOCHET',          max: 2, color: '#c8ff3a', icon: 'R', tags: ['gun'],           desc: ['BULLETS BOUNCE ONCE', 'BULLETS BOUNCE TWICE'] },
+    frenzy:    { name: 'FRENZY',            max: 2, color: '#ff6ad8', icon: 'Z', tags: ['gun', 'combo'],  desc: ['KILLS: +2% FIRE RATE', '+3% PER KILL, CAP 50%'] },
+    streak:    { name: 'HOT STREAK',        max: 2, color: '#ff2a4a', icon: 'S', tags: ['combo'],         desc: ['X4 COMBO: OVERDRIVE', 'X4 AND X8: LONGER'] },
+    static:    { name: 'STATIC FIELD',      max: 2, color: '#8ab8ff', icon: 'E', tags: ['shock', 'combo'], desc: ['EVERY 12 KILLS: LIGHTNING', 'EVERY 8 KILLS, MORE ARCS'] },
+    leech:     { name: 'BLOODLUST',         max: 2, color: '#ff3a5a', icon: 'L', tags: ['combo'],         desc: ['KILLS HEAL, MORE WHEN LOW', 'KILLS HEAL TWICE AS MUCH'] },
+    dronelink: { name: 'DRONE LINK',        max: 2, color: '#ff7ad8', icon: 'D', tags: ['drone', 'gun'],  desc: ['DRONES FIRE 2X, PIERCE', 'DRONES USE YOUR PERKS'],
+                 needs: p => p.gear.drone > 0, needName: 'A SENTRY DRONE' },
+    scavenger: { name: 'SCAVENGER',         max: 1, color: '#5affc8', icon: '$', tags: [],                desc: ['BIG MAGNET, MORE AMMO'] },
+  };
+  const PERK_KEYS = Object.keys(PERKS);
+  // perk damage keeps pace with alien HP growth
+  const perkDmg = base => base * (1 + (wave - 1) * 0.12);
+
   // arenas rotate after every boss
   const ARENAS = [
     { name: 'SECTOR 88', sub: 'HANGAR DECK', style: 'metal', emblem: '88', accent: '#ff3a6a', neonA: '255,40,140', neonB: '60,200,255', vent: '#ff2a4a', amb: [0.85, 0.95, 1.3], wall: '#15171d', wallPanel: '#20232c', pillar: 'octagon',
@@ -793,6 +815,7 @@
       invuln: 0, dash: 0, dashCd: 0, dx: 0, dy: 0, cur: 0, prev: 0, fireCd: 0, muzzle: 0, recoil: 0,
       spin: 0, overdrive: 0, aegis: 0, chrono: 0, walk: 0, moving: 0,
       gear: { armor: 0, vital: 0, shield: 0, boots: 0, drone: 0 },
+      perk: Object.fromEntries(PERK_KEYS.map(k => [k, 0])), frenzy: 0, staticN: 0, trailD: 0, streakLvl: 0,
       shield: 0, shieldMax: 0, shieldDelay: 0, shieldHit: 0, drones: [], hazardT: 0,
       legA: -Math.PI / 2, kickA: 0, swapT: 0, hitT: 0, pumpT: 0, heat: 0, stepSign: 1, flashRot: 0,
       ws: WEAPONS.map((w, i) => ({ owned: i === 0, ammo: i === 0 ? Infinity : 0, lvl: 0 })),
@@ -830,6 +853,7 @@
     if (!dx && !dy) { dx = Math.cos(p.angle); dy = Math.sin(p.angle); }
     p.dx = dx; p.dy = dy;
     p.dash = 0.15; p.dashCd = 1.0 - 0.15 * p.gear.boots;
+    p.trailD = 26; // first flame lands right where the dash starts
     p.invuln = Math.max(p.invuln, 0.3);
     A.sfx('dash');
     part({ kind: 'ring', x: p.x, y: p.y, vx: 0, vy: 0, life: 0.3, size: 30, color: '#5ad1ff', glow: true });
@@ -882,6 +906,11 @@
       const s = p.speed * 3.4;
       p.vx = p.dx * s; p.vy = p.dy * s;
       part({ kind: 'after', x: p.x, y: p.y, vx: 0, vy: 0, a: p.angle, life: 0.22 });
+      if (p.perk.trail) {
+        p.trailD += s * dt;
+        while (p.trailD >= 26) { p.trailD -= 26; dropFire(p.x, p.y, p.perk.trail); }
+      }
+      if (p.dash <= 0 && p.perk.blast) kineticBlast();
     } else {
       const k = 1 - Math.exp(-dt * 16);
       p.vx = lerp(p.vx, mx * speed, k); p.vy = lerp(p.vy, my * speed, k);
@@ -916,7 +945,7 @@
     if (w.spin) p.spin = firing ? Math.min(1, p.spin + dt * 1.8) : Math.max(0, p.spin - dt * 1.5);
     if (!firing || p.dash > 0) { p.fireCd = Math.max(0, p.fireCd - dt); return; }
     p.fireCd -= dt;
-    let rate = w.rate * (p.overdrive > 0 ? 1.6 : 1);
+    let rate = w.rate * (p.overdrive > 0 ? 1.6 : 1) * (1 + frenzyBonus());
     if (w.spin) rate *= 0.2 + 0.8 * p.spin;
     let guard = 0;
     while (p.fireCd <= 0 && guard++ < 6) {
@@ -944,7 +973,7 @@
     } else if (w.kind === 'arc') {
       fireArc(w, dmg, m.x, m.y, p.angle);
     } else {
-      const n = w.pellets || 1;
+      const n = w.pellets || 1, ign = igniteChance(w);
       for (let i = 0; i < n; i++) {
         const spread = w.spread * (w.spin ? 1.2 - p.spin * 0.4 : 1);
         const a = p.angle + (Math.random() - 0.5) * spread;
@@ -954,6 +983,7 @@
           vx: Math.cos(a) * sp + p.vx * 0.3, vy: Math.sin(a) * sp + p.vy * 0.3,
           life: w.life * (w.kind === 'flame' ? rand(0.75, 1.1) : 1), max: w.life,
           dmg, r: w.r, pierce: w.pierce || 0, color: w.color, knock: w.knock, splash: w.splash || 0, hits: null,
+          ign, rico: w.kind === 'bullet' ? p.perk.ricochet : 0,
         };
         if (w.kind === 'flame') { b.pierce = 99; b.hits = new Set(); }
         if (w.kind === 'saw') { b.pierce = 99; b.hits = new Set(); b.bounces = w.bounces; b.rot = 0; }
@@ -1015,7 +1045,7 @@
       beams.push({ kind: 'bolt', pts: jagged(pts), life: 0.1, max: 0.1, color: w.color, w: 2 });
       return;
     }
-    const hit = new Set();
+    const hit = new Set(), ign = w.ign !== undefined ? w.ign : igniteChance(w);
     let cur = tgt, d = dmg;
     for (let k = 0; k <= w.chains && cur; k++) {
       hit.add(cur);
@@ -1023,6 +1053,7 @@
       const px = pts[pts.length - 2];
       const dx = cur.x - px[0], dy = cur.y - px[1], dl = Math.hypot(dx, dy) || 1;
       damageEnemy(cur, d, dx / dl, dy / dl, w.knock);
+      perkHit(cur, ign);
       sparks(cur.x, cur.y, w.color, 5, 260);
       d *= 0.85;
       let nx = null, nd = 220 * 220;
@@ -1054,11 +1085,13 @@
         if (d2 < bd) { bd = d2; best = e; }
       }
       if (!best) { d.cd = 0.1; return; }
-      d.cd = 0.22;
+      const link = p.perk.dronelink;
+      d.cd = link ? 0.11 : 0.22;
       const a = Math.atan2(best.y - d.y, best.x - d.x);
       d.aim = a; d.flash = 0.05;
       bullets.push({ kind: 'bullet', x: d.x, y: d.y, px: d.x, py: d.y, vx: Math.cos(a) * 1200, vy: Math.sin(a) * 1200, life: 0.5, max: 0.5,
-        dmg: 11 * (1 + wave * 0.1), r: 2.5, pierce: 0, color: '#ff7ad8', knock: 40, splash: 0, hits: null });
+        dmg: 11 * (1 + wave * 0.1) * (link >= 2 ? 1.3 : 1), r: 2.5, pierce: link ? 1 : 0, color: link ? '#ffb0ec' : '#ff7ad8', knock: 40, splash: 0, hits: null,
+        ign: link >= 2 ? p.perk.ignite * 0.1 : 0, rico: link >= 2 ? p.perk.ricochet : 0 });
       A.sfx('drone');
     });
   }
@@ -1067,7 +1100,13 @@
     heal: { name: 'FIELD SURGEON', desc: 'FULL HEAL', color: '#ff4a5a', icon: 'H' },
     wup:  { name: 'GUNSMITH', desc: '+1 LEVEL TO HELD WEAPON', color: '#5ad1ff', icon: 'G' },
   };
-  const gearInfo = k => GEAR[k] || GEAR_EXTRA[k];
+  const gearInfo = k => GEAR[k] || GEAR_EXTRA[k] || PERKS[k];
+  const isPerk = k => !!PERKS[k];
+  // what a crate for key k gives if taken now
+  const crateDesc = k => (PERKS[k] ? PERKS[k].desc[Math.min(player.perk[k], PERKS[k].max - 1)] : gearInfo(k).desc);
+  const ownedTags = p => new Set(PERK_KEYS.filter(k => p.perk[k] > 0).flatMap(k => PERKS[k].tags));
+  const perkOpen = (p, k) => p.perk[k] < PERKS[k].max && (!PERKS[k].needs || PERKS[k].needs(p));
+  const synergy = (p, k) => p.perk[k] === 0 && PERKS[k].tags.some(t => ownedTags(p).has(t));
 
   function applyGear(key) {
     const p = player;
@@ -1078,26 +1117,59 @@
       return;
     }
     if (key === 'wup') { collect({ kind: 'upgrade', x: p.x, y: p.y }); return; }
-    const lvl = ++p.gear[key];
-    switch (key) {
-      case 'vital': p.maxHp += 25; p.hp = Math.min(p.maxHp, p.hp + 50); break;
-      case 'shield': p.shieldMax = 30 * lvl; p.shield = p.shieldMax; break;
-      case 'drone': p.drones.push({ a: 0, cd: 0.5, x: p.x, y: p.y, aim: p.angle, flash: 0 }); break;
+    // perks whose prerequisite this pick satisfies get called out on the banner
+    const locked = PERK_KEYS.filter(k => PERKS[k].needs && !PERKS[k].needs(p));
+    let info, lvl;
+    if (isPerk(key)) {
+      info = PERKS[key];
+      const desc = crateDesc(key);
+      lvl = ++p.perk[key];
+      info = { ...info, desc };
+    } else {
+      info = GEAR[key];
+      lvl = ++p.gear[key];
+      switch (key) {
+        case 'vital': p.maxHp += 25; p.hp = Math.min(p.maxHp, p.hp + 50); break;
+        case 'shield': p.shieldMax = 30 * lvl; p.shield = p.shieldMax; break;
+        case 'drone': p.drones.push({ a: 0, cd: 0.5, x: p.x, y: p.y, aim: p.angle, flash: 0 }); break;
+      }
     }
-    banner(GEAR[key].name, `LEVEL ${lvl} - ${GEAR[key].desc}`, GEAR[key].color, 2.2, '', true);
-    A.sfx('gear');
-    part({ kind: 'ring', x: p.x, y: p.y, vx: 0, vy: 0, life: 0.5, size: 60, color: GEAR[key].color, glow: true });
+    const opened = locked.filter(k => PERKS[k].needs(p));
+    const sub2 = opened.length ? `SYNERGY UNLOCKED: ${opened.map(k => PERKS[k].name).join(', ')}` : isPerk(key) ? 'PERK' : '';
+    banner(info.name, `${info.max > 1 ? `LEVEL ${lvl} - ` : ''}${info.desc}`, info.color, 2.4, sub2, true);
+    A.sfx(isPerk(key) ? 'perk' : 'gear');
+    part({ kind: 'ring', x: p.x, y: p.y, vx: 0, vy: 0, life: 0.5, size: 60, color: info.color, glow: true });
+    if (isPerk(key)) part({ kind: 'ring', x: p.x, y: p.y, vx: 0, vy: 0, life: 0.7, size: 110, color: info.color, glow: true });
   }
 
-  // three crates, take one: the others are recalled
+  // three crates, take one: the others are recalled. One slot is always gear, one always a perk,
+  // the third is either; perks that combo with what you own are favoured.
   let dropGroup = 0;
+  function weightedPick(keys, wt) {
+    let tot = 0;
+    for (const k of keys) tot += wt(k);
+    let r = Math.random() * tot;
+    for (const k of keys) { r -= wt(k); if (r <= 0) return k; }
+    return keys[keys.length - 1];
+  }
   function supplyDrop() {
     const p = player;
     for (const pk of pickups) if (pk.kind === 'gear') pk.dead = true;
-    const avail = GEAR_KEYS.filter(k => p.gear[k] < GEAR[k].max).sort(() => Math.random() - 0.5);
-    const picks = avail.slice(0, 3);
-    if (picks.length < 3 && !picks.includes('heal')) picks.push('heal');
+    const gear = GEAR_KEYS.filter(k => p.gear[k] < GEAR[k].max);
+    const perks = PERK_KEYS.filter(k => perkOpen(p, k));
+    const perkW = k => 1 + (p.perk[k] > 0 ? 0.8 : 0) + (synergy(p, k) ? 1.6 : 0) + (PERKS[k].needs ? 2 : 0);
+    const take = (pool, wt) => { if (!pool.length) return null; const k = wt ? weightedPick(pool, wt) : choose(pool); pool.splice(pool.indexOf(k), 1); return k; };
+    const picks = [];
+    const g = take(gear), k1 = take(perks, perkW);
+    if (g) picks.push(g);
+    if (k1) picks.push(k1);
+    while (picks.length < 3 && (gear.length || perks.length)) {
+      const usePerk = perks.length && (!gear.length || Math.random() < 0.6);
+      picks.push(usePerk ? take(perks, perkW) : take(gear));
+    }
+    if (picks.length < 3) picks.push('heal');
     while (picks.length < 3) picks.push('wup');
+    picks.sort(() => Math.random() - 0.5);
     dropGroup++;
     const base = rand(0, TAU);
     picks.forEach((gk, i) => {
@@ -1107,6 +1179,136 @@
       pickups.push({ kind: 'gear', gk, group: dropGroup, x: o.x, y: o.y, t: rand(0, 6), life: Infinity, drop: 0.7 + i * 0.12 });
     });
     banner('SUPPLY DROP', 'GRAB ONE UPGRADE', '#5affc8', 2.2);
+  }
+
+  // ======================================================================= perks
+  let fires = []; // afterburner patches on the floor
+  let booms = []; // queued perk detonations: a short fuse makes chain reactions ripple outward
+
+  function igniteChance(w) {
+    const l = player ? player.perk.ignite : 0;
+    if (!l || w.kind === 'flame') return 0;
+    return l * 0.2 * (w.rate > 12 ? 0.5 : 1) * (w.pellets ? 0.45 : 1);
+  }
+  function ignite(e, t = 2.2) {
+    if (e.dead || e.under) return;
+    if (!(e.burn > 0)) {
+      for (let i = 0; i < 4; i++) part({ kind: 'fire', x: e.x + rand(-e.r, e.r) * 0.5, y: e.y + rand(-e.r, e.r) * 0.5, vx: rand(-40, 40), vy: rand(-90, -30), life: rand(0.25, 0.4), size: rand(8, 14), glow: true, drag: 1 });
+      A.sfx('ignite');
+    }
+    e.burn = Math.max(e.burn, t);
+  }
+  function perkHit(e, chance) { if (chance > 0 && !e.dead && Math.random() < chance) ignite(e); }
+
+  // a bullet that would stop on this alien hops to the nearest other one instead
+  function bounceBullet(b, e) {
+    let tgt = null, bd = 380 * 380;
+    for (const o of enemies) {
+      if (o === e || o.dead || o.under || (b.hits && b.hits.has(o)) || (o.type === 'phantom' && o.cloaked)) continue;
+      const d2 = (o.x - b.x) ** 2 + (o.y - b.y) ** 2;
+      if (d2 < bd) { bd = d2; tgt = o; }
+    }
+    if (!tgt) return false;
+    b.rico--;
+    (b.hits || (b.hits = new Set())).add(e);
+    const sp = Math.hypot(b.vx, b.vy) || 1, a = Math.atan2(tgt.y - b.y, tgt.x - b.x);
+    b.vx = Math.cos(a) * sp; b.vy = Math.sin(a) * sp;
+    b.life = Math.min(b.max, Math.max(b.life, Math.sqrt(bd) / sp + 0.12));
+    b.dmg *= 0.8;
+    b.color = PERKS.ricochet.color;
+    sparks(b.x, b.y, PERKS.ricochet.color, 4, 200, a, 0.6);
+    A.sfx('ricochet');
+    return true;
+  }
+
+  function frenzyBonus() {
+    const l = player.perk.frenzy;
+    return l ? Math.min(l > 1 ? 0.5 : 0.3, player.frenzy * (l > 1 ? 0.03 : 0.02)) : 0;
+  }
+
+  function dropFire(x, y, lvl) {
+    if (fires.length >= 90) fires.shift();
+    const life = lvl > 1 ? 4 : 2.5;
+    fires.push({ x: x + rand(-4, 4), y: y + rand(-4, 4), r: lvl > 1 ? 34 : 26, life, max: life, tick: 0, ph: rand(0, TAU) });
+  }
+
+  function kineticBlast() {
+    const p = player, l = p.perk.blast, R = l > 1 ? 165 : 125, dmg = perkDmg(l > 1 ? 40 : 28), c = PERKS.blast.color;
+    part({ kind: 'ring', x: p.x, y: p.y, vx: 0, vy: 0, life: 0.35, size: R, color: c, glow: true });
+    part({ kind: 'flash', x: p.x, y: p.y, vx: 0, vy: 0, life: 0.12, size: R * 0.8, color: c, glow: true });
+    sparks(p.x, p.y, c, 14, 420);
+    ripple(p.x, p.y, R * 2.2, 0.025, 0.4);
+    shake = Math.min(30, shake + 6);
+    A.sfx('kinetic');
+    for (const e of enemies) {
+      if (e.dead || e.under) continue;
+      const dx = e.x - p.x, dy = e.y - p.y, d = Math.hypot(dx, dy) || 1;
+      if (d < R + e.r) damageEnemy(e, dmg * (1 - (d / (R + e.r)) * 0.5), dx / d, dy / d, 520);
+    }
+    if (l > 1) for (const s of eshots) if (!s.lob && !s.dead && Math.hypot(s.x - p.x, s.y - p.y) < R) { s.dead = true; sparks(s.x, s.y, c, 3, 140); }
+  }
+
+  function queueBoom(x, y, R, dmg, color) {
+    if (booms.length >= 40) return;
+    booms.push({ x, y, R, dmg, color, t: rand(0.08, 0.16) });
+    part({ kind: 'flash', x, y, vx: 0, vy: 0, life: 0.1, size: 22, color, glow: true });
+  }
+
+  function staticBurst() {
+    const p = player, l = p.perk.static;
+    const w = { range: 540, chains: l > 1 ? 4 : 3, color: PERKS.static.color, knock: 80, ign: player.perk.ignite * 0.2 };
+    const dmg = perkDmg(l > 1 ? 48 : 40);
+    const near = enemies.filter(e => !e.dead && !e.under && Math.hypot(e.x - p.x, e.y - p.y) < 520)
+      .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))
+      .slice(0, l > 1 ? 5 : 3);
+    if (!near.length) { p.staticN = (l > 1 ? 8 : 12) - 1; return; } // hold the charge for the next kill
+    part({ kind: 'ring', x: p.x, y: p.y, vx: 0, vy: 0, life: 0.3, size: 80, color: w.color, glow: true });
+    for (const e of near) if (!e.dead) fireArc(w, dmg, p.x, p.y, Math.atan2(e.y - p.y, e.x - p.x));
+    A.sfx('arc');
+  }
+
+  // every perk that reacts to a kill
+  function perkKill(e, T) {
+    const p = player, P = p.perk;
+    if (P.leech) p.hp = Math.min(p.maxHp, p.hp + P.leech * (p.hp < p.maxHp * 0.35 ? 2 : 1));
+    if (P.frenzy) p.frenzy++;
+    if (!T.boss) {
+      const pyre = P.pyre > 0 && e.burn > 0;
+      if (pyre || (P.chain && Math.random() < P.chain * 0.12)) {
+        const R = (pyre && P.pyre > 1 ? 100 : 78) + e.r * 0.5;
+        queueBoom(e.x, e.y, R, perkDmg(pyre ? 34 : 40), pyre ? PERKS.pyre.color : PERKS.chain.color);
+      }
+    }
+    if (P.static && ++p.staticN >= (P.static > 1 ? 8 : 12)) { p.staticN = 0; staticBurst(); }
+    if (P.streak) {
+      const tier = mult >= 8 && P.streak > 1 ? 2 : mult >= 4 ? 1 : 0;
+      if (tier > p.streakLvl) {
+        p.streakLvl = tier;
+        p.overdrive = Math.max(p.overdrive, P.streak > 1 ? 6 : 4);
+        floatText(p.x, p.y - 34, 'HOT STREAK!', PERKS.streak.color, 12);
+        A.sfx('overdrive');
+      }
+    }
+  }
+
+  function updatePerks(dt) {
+    for (const f of fires) {
+      f.life -= dt;
+      if (f.life <= 0) { f.dead = true; continue; }
+      const k = f.life / f.max;
+      if (Math.random() < 0.35 * k + 0.05) part({ kind: 'fire', x: f.x + rand(-f.r, f.r) * 0.5, y: f.y + rand(-f.r, f.r) * 0.5, vx: rand(-15, 15), vy: rand(-55, -20), life: rand(0.25, 0.45), size: rand(7, 13) * (0.5 + k * 0.5), glow: true, drag: 1 });
+      if ((f.tick -= dt) > 0) continue;
+      f.tick = 0.15;
+      for (const e of enemies) if (!e.dead && !e.under && (e.x - f.x) ** 2 + (e.y - f.y) ** 2 < (f.r + e.r) ** 2) ignite(e, 1.8);
+    }
+    compact(fires);
+    for (const b of booms) {
+      if (b.dead || (b.t -= dt) > 0) continue;
+      b.dead = true;
+      explode(b.x, b.y, b.R, b.dmg, 'perk');
+      part({ kind: 'ring', x: b.x, y: b.y, vx: 0, vy: 0, life: 0.3, size: b.R * 0.8, color: b.color, glow: true });
+    }
+    compact(booms);
   }
 
   function hitShield(dmg) {
@@ -1153,7 +1355,7 @@
     tmax = Math.max(0, tmax);
     const x1 = x0 + c * tmax, y1 = y0 + s * tmax;
     for (const e of enemies) {
-      if (!e.dead && segCircle(x0, y0, x1, y1, e.x, e.y, e.r + 6)) damageEnemy(e, dmg, c, s, w.knock);
+      if (!e.dead && segCircle(x0, y0, x1, y1, e.x, e.y, e.r + 6)) { damageEnemy(e, dmg, c, s, w.knock); perkHit(e, igniteChance(w) * 2); }
     }
     beams.push({ x0, y0, x1, y1, life: 0.28, max: 0.28, color: w.color, w: 10 });
     sparks(x1, y1, w.color, 14, 380);
@@ -1727,6 +1929,7 @@
       const pts = T.score * (e.elite && !T.boss ? 5 : 1) * mult;
       score += pts;
       if (pts >= 150 || T.boss || (e.elite && !T.boss)) floatText(e.x, e.y - e.r, '+' + pts, pts >= 500 ? '#ffd23a' : '#ffffff', pts >= 500 ? 16 : 10);
+      perkKill(e, T);
     }
     blood(e.x, e.y, T.blood, 14 + e.r, 260);
     const ng = 3 + Math.floor(e.r / 6);
@@ -1769,7 +1972,7 @@
       const cw = WEAPONS[player.cur], cs = player.ws[player.cur];
       const ownsAmmoGun = player.ws.some((st, i) => st.owned && WEAPONS[i].ammoMax !== Infinity);
       const low = cw.ammoMax !== Infinity ? cs.ammo < cw.ammoMax * 0.25 : ownsAmmoGun;
-      const ammo = 0.065 * mul * (low ? 1.8 : 1);
+      const ammo = 0.065 * mul * (low ? 1.8 : 1) * (player.perk.scavenger ? 1.5 : 1);
       if (r < med) spawnPickup('med', e.x, e.y);
       else if (r < med + ammo) spawnPickup('ammo', e.x, e.y);
       else if (r < med + ammo + 0.016 * mul) spawnPickup('power', e.x, e.y, choose(['overdrive', 'overdrive', 'aegis', 'chrono', 'nova', 'nova']));
@@ -1777,19 +1980,21 @@
   }
 
   function explode(x, y, R, dmg, src) {
-    shake = Math.min(30, shake + (src === 'player' ? 9 : 12)); aberr = Math.max(aberr, src === 'player' ? 0.25 : 0.45);
-    if (R >= 90 && src !== 'fx') ripple(x, y, R * 2.6, src === 'player' ? 0.02 : 0.03, 0.45);
+    // perk blasts can cascade a dozen at a time, so they're lighter on particles and shake
+    const lite = src === 'perk', mine = src === 'player' || lite;
+    shake = Math.min(30, shake + (lite ? 5 : mine ? 9 : 12)); aberr = Math.max(aberr, lite ? 0.15 : mine ? 0.25 : 0.45);
+    if (R >= 90 && src !== 'fx') ripple(x, y, R * 2.6, mine ? 0.02 : 0.03, 0.45);
     part({ kind: 'flash', x, y, vx: 0, vy: 0, life: 0.18, size: R * 1.1, color: '#ffd27a', glow: true });
     part({ kind: 'ring', x, y, vx: 0, vy: 0, life: 0.35, size: R, color: '#ff9a3a', glow: true });
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i < (lite ? 11 : 22); i++) {
       const a = rand(0, TAU), s = rand(40, 260);
       part({ kind: 'fire', x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.3, 0.6), size: rand(10, 22), glow: true, drag: 4 });
     }
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < (lite ? 4 : 10); i++) {
       const a = rand(0, TAU), s = rand(20, 120);
       part({ kind: 'smoke', x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.8, 1.4), size: rand(16, 30), drag: 2, color: '30,28,26' });
     }
-    sparks(x, y, '#ffcf5a', 18, 520);
+    sparks(x, y, '#ffcf5a', lite ? 8 : 18, 520);
     scorch(x, y, R * 0.65);
     A.sfx('explode');
     if (src === 'fx') return;
@@ -1910,6 +2115,7 @@
   function startWave(n) {
     wave = n;
     waveActive = true;
+    player.frenzy = 0;
     SC = waveScale(n);
     const boss = n % 5 === 0;
     const avail = INTRO_ORDER.filter(t => ET[t].first <= n);
@@ -1973,7 +2179,7 @@
       buildArena(relo.next);
       keep.x = arena.start[0] * AW; keep.y = arena.start[1] * AH;
       for (const d of keep.drones) { d.x = keep.x; d.y = keep.y; }
-      pickups = []; bullets = []; eshots = []; particles = []; beams = []; shocks = [];
+      pickups = []; bullets = []; eshots = []; particles = []; beams = []; shocks = []; fires = []; booms = [];
       cam.x = keep.x; cam.y = keep.y;
       banner(arena.name, arena.sub, arena.accent, 2.6, '', true);
       supplyDrop();
@@ -1986,7 +2192,7 @@
     relo = null; entry = null; highlight = -1; optionsOpen = false;
     buildArena(ARENAS[0]);
     player = newPlayer();
-    enemies = []; bullets = []; eshots = []; particles = []; pickups = []; beams = []; banners = []; shocks = [];
+    enemies = []; bullets = []; eshots = []; particles = []; pickups = []; beams = []; banners = []; shocks = []; fires = []; booms = [];
     wave = 0; waveActive = false; interTimer = 2.5; spawnQueue = []; SC = waveScale(1);
     score = 0; kills = 0; combo = 0; comboTimer = 0; mult = 1;
     hud = newHud();
@@ -2246,7 +2452,7 @@
     if (state === 'play') {
       updatePlayer(dt);
       comboTimer -= dt;
-      if (comboTimer <= 0 && combo) { combo = 0; mult = 1; }
+      if (comboTimer <= 0 && combo) { combo = 0; mult = 1; player.streakLvl = 0; }
     } else if (state === 'dying') {
       dyingT -= rdt;
       if (dyingT <= 0) { state = 'over'; overT = 0; }
@@ -2259,6 +2465,7 @@
     updateBullets(dt);
     updateEShots(edt);
     updateShocks(edt);
+    if (player) updatePerks(dt);
     updateRelocation(rdt);
     compact(enemies);
 
@@ -2275,7 +2482,8 @@
       }
       if (state !== 'play') continue;
       const dx = player.x - pk.x, dy = player.y - pk.y, d = Math.hypot(dx, dy) || 1;
-      if (pk.kind !== 'gear' && d < 120) { const s = (1 - d / 120) * 600 + 80; pk.x += (dx / d) * s * dt; pk.y += (dy / d) * s * dt; }
+      const mR = player.perk.scavenger ? 320 : 120;
+      if (pk.kind !== 'gear' && d < mR) { const s = (1 - d / mR) * 600 + 80; pk.x += (dx / d) * s * dt; pk.y += (dy / d) * s * dt; }
       if (d < player.r + (pk.kind === 'gear' ? 24 : 18)) collect(pk);
     }
     compact(pickups);
@@ -2395,9 +2603,11 @@
         const sp = Math.hypot(b.vx, b.vy) || 1;
         damageEnemy(e, b.kind === 'flame' ? b.dmg * (0.5 + b.life / b.max) : b.dmg, b.vx / sp, b.vy / sp, b.knock);
         if (b.kind === 'flame') { e.burn = Math.max(e.burn, 1.6); b.hits.add(e); continue; }
+        perkHit(e, b.ign);
         if (b.kind === 'saw') { b.hits.add(e); continue; }
         part({ kind: 'flash', x: b.x, y: b.y, vx: 0, vy: 0, life: 0.05, size: 10 + b.r * 2, color: '#ffffff', glow: true });
         if (b.pierce > 0) { b.pierce--; (b.hits || (b.hits = new Set())).add(e); }
+        else if (b.rico > 0 && bounceBullet(b, e)) break;
         else { b.dead = true; break; }
       }
     }
@@ -2406,6 +2616,7 @@
 
   function updateEShots(dt) {
     for (const s of eshots) {
+      if (s.dead) continue; // erased this frame (nova, kinetic dash)
       if (s.lob) {
         s.t += dt;
         const f = Math.min(1, s.t / s.dur);
@@ -3008,6 +3219,26 @@
     switch (pk.kind) {
       case 'gear': {
         const info = gearInfo(pk.gk);
+        if (isPerk(pk.gk)) {
+          // perk crate: hexagonal pod with a spinning ring, so it reads differently from stat gear
+          const hex = r => { ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = i * TAU / 6 + Math.PI / 6; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); };
+          ctx.fillStyle = '#1e1a2a'; hex(20); ctx.fill();
+          ctx.strokeStyle = info.color; ctx.lineWidth = 2.5; ctx.stroke();
+          ctx.fillStyle = '#100c18'; hex(13); ctx.fill();
+          ctx.strokeStyle = hexA(info.color, 0.55); ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(0, 0, 25, pk.t * 2, pk.t * 2 + 1.4); ctx.stroke();
+          ctx.beginPath(); ctx.arc(0, 0, 25, pk.t * 2 + Math.PI, pk.t * 2 + Math.PI + 1.4); ctx.stroke();
+          ctx.font = font(12); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = info.color;
+          ctx.fillText(info.icon, 1, 1);
+          if (!(pk.drop > 0)) {
+            const lv = player.perk[pk.gk];
+            ctx.font = font(7); ctx.fillStyle = '#000'; ctx.fillText(info.name, 1, -33); ctx.fillStyle = info.color; ctx.fillText(info.name, 0, -34);
+            ctx.font = font(6); ctx.fillStyle = '#c8d0e8'; ctx.fillText(crateDesc(pk.gk), 0, 32);
+            ctx.fillStyle = info.color; ctx.fillText(lv ? `PERK LV ${lv + 1}` : 'NEW PERK', 0, 42);
+            if (synergy(player, pk.gk) || (info.needs && !lv)) { ctx.fillStyle = Math.sin(pk.t * 6) > -0.4 ? '#ffd23a' : '#fff6c8'; ctx.fillText('SYNERGY', 0, -44); }
+          }
+          break;
+        }
         ctx.fillStyle = '#262a34'; ctx.fillRect(-18, -15, 36, 30);
         ctx.strokeStyle = '#4a505e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-18, -15); ctx.lineTo(18, 15); ctx.moveTo(18, -15); ctx.lineTo(-18, 15); ctx.stroke();
         ctx.fillStyle = '#16181e'; ctx.fillRect(-11, -9, 22, 18);
@@ -3233,6 +3464,7 @@
     let fl = 0;
     for (const b of bullets) if (b.kind === 'flame' && (fl++ % 4 === 0)) L(b.x, b.y, 110, 0.35, lc('#ff7a1a', 0.15));
     for (const v of vents) if (v.pulse > 0.05) L(v.x, v.y, 160 * v.pulse, 0.6 * v.pulse, lc(arena.vent));
+    for (let i = 0; i < fires.length; i += 3) { const f = fires[i]; L(f.x, f.y, 100, 0.4 * Math.min(1, (f.life / f.max) * 2), lc('#ff7a1a', 0.15)); }
     for (const e of enemies) {
       if (e.burn > 0) L(e.x, e.y, 80, 0.45, lc('#ff7a1a', 0.15));
       else if (isBoss(e)) L(e.x, e.y, 200, 0.4, lc(ET[e.type].color || ET[e.type].eye));
@@ -3363,6 +3595,14 @@
     for (const pk of pickups) if (vis(pk, 40)) drawPickup(pk);
     drawParticlesBase(x0, y0, x1, y1);
     drawTempPools();
+    for (const f of fires) {
+      if (!vis(f, f.r)) continue;
+      const k = f.life / f.max;
+      ctx.globalAlpha = 0.45 * Math.min(1, k * 2);
+      ctx.fillStyle = '#3a1004'; ell(f.x, f.y, f.r * 0.8, f.r * 0.6);
+      ctx.fillStyle = '#c0400a'; ctx.globalAlpha *= 0.7; ell(f.x, f.y, f.r * 0.45, f.r * 0.32);
+      ctx.globalAlpha = 1;
+    }
     drawPlayerRing(false);
     const actors = settings.fx > 0;
     if (actors) { beginActors(); setWorld(); }
@@ -3407,6 +3647,11 @@
       const c = pl.kind === 'slime' ? '#3aff6a' : pl.kind === 'acid' ? '#b8ff3a' : '#ff9a2a';
       glow(c, pl.x, pl.y, pl.r * 1.15, 0.16 + beatPulse * 0.1 + Math.sin(gameTime * 2 + pl.x) * 0.04);
       if (Math.random() < 0.08) part({ kind: 'ring', x: pl.x + rand(-pl.r, pl.r) * 0.6, y: pl.y + rand(-pl.r, pl.r) * 0.6, vx: 0, vy: 0, life: 0.4, size: rand(4, 9), color: c, glow: true });
+    }
+    for (const f of fires) {
+      if (!vis(f, f.r * 2)) continue;
+      const k = f.life / f.max;
+      glow(k > 0.5 ? '#ff8a2a' : '#c0300a', f.x, f.y, f.r * 1.5, (0.3 + Math.sin(gameTime * 17 + f.ph) * 0.08) * Math.min(1, k * 2.5));
     }
     for (const pk of pickups) {
       if (!vis(pk, 60)) continue;
@@ -3638,8 +3883,27 @@
     if (frac >= hud.hpTrail) hud.hpTrail = frac;
     else if ((hud.hpHold -= rdt) <= 0) hud.hpTrail = Math.max(frac, hud.hpTrail - rdt * 0.9);
     const gearOwned = GEAR_KEYS.filter(k => p.gear[k] > 0);
+    const perksOwned = PERK_KEYS.filter(k => p.perk[k] > 0);
     const powers = Object.keys(POWER).filter(k => p[k] > 0 && POWER[k].dur > 0);
-    const cw = small ? 240 : 290, ch = 64 + (gearOwned.length || powers.length ? 32 : 0);
+    const cw = small ? 240 : 290;
+    // lay out gear chips, perk chips and timed power-ups left to right, wrapping into rows
+    const chips = [];
+    {
+      const maxX = cw - 24;
+      let cx = 0, row = 0;
+      const put = (w, item, gapBefore = 0) => {
+        if (cx && cx + gapBefore + w > maxX) { cx = 0; row++; } else cx += cx ? gapBefore : 0;
+        chips.push({ ...item, x: cx, row, w });
+        cx += w + 4;
+      };
+      for (const k of gearOwned) put(24, { kind: 'gear', k });
+      perksOwned.forEach((k, i) => put(24, { kind: 'perk', k }, i === 0 && gearOwned.length ? 6 : 0));
+      ctx.font = ufont(11, 700); ctx.letterSpacing = '1px';
+      powers.forEach((k, i) => put(Math.min(maxX, ctx.measureText(POWER[k].name).width + 18), { kind: 'power', k }, i === 0 && chips.length ? 6 : 0));
+      ctx.letterSpacing = '0px';
+    }
+    const rows = chips.length ? chips[chips.length - 1].row + 1 : 0;
+    const ch = 64 + (rows ? rows * 28 + 4 : 0);
     const jit = hurtFlash > 0.05 ? Math.sin(gameTime * 90) * hurtFlash * 3 : 0;
     const hx = 16 + jit, hy = 16;
     hudPanel(hx, hy, cw, ch, '#ff4f8a');
@@ -3659,28 +3923,33 @@
     utext('DASH', bx, hy + 49, 10, dr >= 1 ? '#7ae0ff' : '#4a6a7a', 'left', 'top', 700, 2);
     hudBar(bx + 42, hy + 52, 70, 4, dr, 0, dr >= 1 ? '#5ad1ff' : '#2a6a8a');
     if (dr >= 1) utext('READY', bx + 120, hy + 49, 10, '#5ad1ff', 'left', 'top', 600, 1);
-    // gear chips + timed power-ups
-    let gx = bx;
-    const gy = hy + 64;
-    for (const k of gearOwned) {
-      const G = GEAR[k];
-      ctx.fillStyle = hexA(G.color, 0.1); ctx.fillRect(gx, gy, 24, 24);
-      ctx.strokeStyle = hexA(G.color, 0.8); ctx.lineWidth = 1; ctx.strokeRect(gx + 0.5, gy + 0.5, 23, 23);
-      text(G.icon, gx + 12, gy + 6, 9, G.color, 'center', 'top', false);
-      for (let l = 0; l < G.max; l++) { ctx.fillStyle = l < p.gear[k] ? G.color : 'rgba(255,255,255,0.15)'; ctx.fillRect(gx + 2 + l * 5, gy + 19, 4, 2); }
-      gx += 28;
-    }
-    if (gearOwned.length) gx += 6;
-    for (const k of powers) {
-      const P = POWER[k];
-      ctx.font = ufont(11, 700); ctx.letterSpacing = '1px';
-      const pw = ctx.measureText(P.name).width + 18;
-      ctx.letterSpacing = '0px';
-      if (gx + pw > hx + cw - 8) break;
-      ctx.fillStyle = hexA(P.color, 0.14); ctx.fillRect(gx, gy, pw, 24);
-      utext(P.name, gx + 9, gy + 4, 11, P.color, 'left', 'top', 700, 1);
-      hudBar(gx + 4, gy + 19, pw - 8, 2, clamp(p[k] / P.dur, 0, 1), 0, P.color);
-      gx += pw + 6;
+    // gear chips, perk chips, timed power-ups
+    for (const c of chips) {
+      const gx = bx + c.x, gy = hy + 64 + c.row * 28;
+      if (c.kind === 'gear') {
+        const G = GEAR[c.k];
+        ctx.fillStyle = hexA(G.color, 0.1); ctx.fillRect(gx, gy, 24, 24);
+        ctx.strokeStyle = hexA(G.color, 0.8); ctx.lineWidth = 1; ctx.strokeRect(gx + 0.5, gy + 0.5, 23, 23);
+        text(G.icon, gx + 12, gy + 6, 9, G.color, 'center', 'top', false);
+        for (let l = 0; l < G.max; l++) { ctx.fillStyle = l < p.gear[c.k] ? G.color : 'rgba(255,255,255,0.15)'; ctx.fillRect(gx + 2 + l * 5, gy + 19, 4, 2); }
+      } else if (c.kind === 'perk') {
+        // perk chips have clipped corners and a charge bar where the perk has one
+        const P = PERKS[c.k], lv = p.perk[c.k];
+        ctx.beginPath(); ctx.moveTo(gx + 5, gy); ctx.lineTo(gx + 24, gy); ctx.lineTo(gx + 24, gy + 19); ctx.lineTo(gx + 19, gy + 24); ctx.lineTo(gx, gy + 24); ctx.lineTo(gx, gy + 5); ctx.closePath();
+        ctx.fillStyle = hexA(P.color, 0.16); ctx.fill();
+        ctx.strokeStyle = hexA(P.color, 0.9); ctx.lineWidth = 1; ctx.stroke();
+        text(P.icon, gx + 12, gy + 6, 9, P.color, 'center', 'top', false);
+        for (let l = 0; l < P.max; l++) { ctx.fillStyle = l < lv ? P.color : 'rgba(255,255,255,0.15)'; ctx.fillRect(gx + 3 + l * 5, gy + 19, 4, 2); }
+        let charge = -1;
+        if (c.k === 'static') charge = p.staticN / (lv > 1 ? 8 : 12);
+        else if (c.k === 'frenzy') charge = frenzyBonus() / (lv > 1 ? 0.5 : 0.3);
+        if (charge >= 0) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(gx + 21, gy + 3, 2, 14); ctx.fillStyle = P.color; ctx.fillRect(gx + 21, gy + 3 + 14 * (1 - charge), 2, 14 * charge); }
+      } else {
+        const P = POWER[c.k];
+        ctx.fillStyle = hexA(P.color, 0.14); ctx.fillRect(gx, gy, c.w, 24);
+        utext(P.name, gx + 9, gy + 4, 11, P.color, 'left', 'top', 700, 1);
+        hudBar(gx + 4, gy + 19, c.w - 8, 2, clamp(p[c.k] / P.dur, 0, 1), 0, P.color);
+      }
     }
 
     // ---- wave header
@@ -4075,12 +4344,37 @@
     return bottom + 20;
   }
 
+  // the run's perks and gear, in the free column left of the options (wide screens only)
+  function drawBuild(y0) {
+    const p = player;
+    if (!p) return;
+    const colW = W / 2 - Math.min(560, W - 40) / 2 - 48;
+    if (colW < 230) return;
+    const items = [
+      ...PERK_KEYS.filter(k => p.perk[k] > 0).map(k => ({ info: PERKS[k], lv: p.perk[k], desc: PERKS[k].desc.slice(0, p.perk[k]).join(' · ') })),
+      ...GEAR_KEYS.filter(k => p.gear[k] > 0).map(k => ({ info: GEAR[k], lv: p.gear[k], desc: GEAR[k].desc })),
+    ];
+    const x = 24 + Math.max(0, colW - 330);
+    utext('YOUR BUILD', x, y0, 14, '#5affc8', 'left', 'top', 700, 3);
+    if (!items.length) { utext('NOTHING YET - GRAB SUPPLY DROPS', x, y0 + 26, 12, '#8a8ab0', 'left', 'top', 600, 1); return; }
+    const rh = clamp(Math.floor((H * 0.56) / items.length), 26, 40);
+    items.forEach((it, i) => {
+      const y = y0 + 26 + i * rh, c = it.info.color;
+      ctx.fillStyle = hexA(c, 0.12); ctx.fillRect(x, y, 22, 22);
+      ctx.strokeStyle = hexA(c, 0.8); ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, 21, 21);
+      text(it.info.icon, x + 11, y + 6, 9, c, 'center', 'top', false);
+      utext(`${it.info.name}${it.info.max > 1 ? `  LV ${it.lv}` : ''}`, x + 30, y + 1, 12, c, 'left', 'top', 700, 1, false);
+      if (rh >= 34) utext(it.desc, x + 30, y + 16, 10, '#b8b0d8', 'left', 'top', 600, 0, false);
+    });
+  }
+
   function drawPause() {
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.fillStyle = 'rgba(4,2,12,0.78)'; ctx.fillRect(0, 0, W, H);
     chromeTitle('PAUSED', W / 2, H * 0.16, Math.min(48, W / 14));
     utext(pad.connected && pad.using ? 'START / B TO RESUME' : 'ESC TO RESUME', W / 2, H * 0.16 + 38, 14, '#ffffff', 'center', 'top', 700, 3);
     const fy = Math.max(H * 0.84, drawOptions(H * 0.27) + 16);
+    drawBuild(H * 0.27);
     utext('WASD MOVE   ·   MOUSE AIM   ·   CLICK FIRE   ·   SPACE DASH   ·   F EARLY CALL', W / 2, fy, 13, '#b8b0d8', 'center', 'top', 600, 1);
     utext('1-0 / WHEEL / Q WEAPONS   ·   M MUSIC   ·   N NEXT TRACK', W / 2, fy + H * 0.04, 13, '#b8b0d8', 'center', 'top', 600, 1);
   }
@@ -4177,7 +4471,9 @@
     pools: () => pools,
     zoom: z => { VIEW = VIEW_BASE = z; },
     aberr: v => { aberr = v; },
-    gear: k => applyGear(k),
+    gear: k => applyGear(k), // gear or perk key
+    drop: () => supplyDrop(),
+    PERKS,
     arena: i => { buildArena(ARENAS[i]); player.x = arena.start[0] * AW; player.y = arena.start[1] * AH; cam.x = player.x; cam.y = player.y; },
     give: () => { player.ws.forEach((st, i) => { st.owned = true; if (WEAPONS[i].ammoMax !== Infinity) st.ammo = WEAPONS[i].ammoMax; }); },
     spawn: (type, n = 1) => { for (let i = 0; i < n; i++) { const a = rand(0, TAU); enemies.push(makeEnemy(type, player.x + Math.cos(a) * 300, player.y + Math.sin(a) * 300, false)); } },
