@@ -797,6 +797,7 @@ window.AudioEngine = (() => {
     thud()    { tone('sine', 120, 40, 0.25, 0.4); nz(0.15, 0.25, 'lowpass', 900, 200, 1); },
     perk()    { notes([67, 74, 79, 86, 91], 0.045, 0.14, 0.12); tone('triangle', 300, 1200, 0.3, 0.08); nz(0.3, 0.12, 'highpass', 6000, 3000, 1); },
     kinetic() { if (!ok('kinetic', 80)) return; tone('sine', 220, 50, 0.3, 0.4); nz(0.25, 0.3, 'bandpass', 2400, 300, 1.2); },
+    dodge()   { nz(0.25, 0.22, 'bandpass', 600, 4000, 2); notes([84, 91], 0.05, 0.12, 0.1); },
     ignite()  { if (!ok('ignite', 120)) return; nz(0.18, 0.12, 'bandpass', 700, 2400, 1.5); },
   };
 

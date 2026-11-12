@@ -26,6 +26,11 @@ Options → Soundtrack switches between STUDIO and SYNTH.
 | Esc / P | Start | Pause + options |
 | M / N | Back (next track) | Music on/off, next track |
 
+## Starting kits
+
+Lifetime challenges unlock starting kits (a weapon plus gear or a perk). Pick one on the main menu or on the game-over screen with A / D, the arrow keys, the d-pad or the bumpers.
+Progress lives in `localStorage` under `p88-profile`. Bot runs (`?bot`) never read or write it.
+
 ## Project layout
 
 - `index.html` — page shell. Bump the `?v=` on the script tags after changing code so browsers don't serve stale copies.
@@ -41,4 +46,4 @@ Options → Soundtrack switches between STUDIO and SYNTH.
 ## Testing tools
 
 - `?bot` — watch an autoplay bot. `?bot&speed=8&runs=4` simulates four runs at 8× and logs the waves it died on.
-- `?debug` — exposes `window.__p88` (god mode, skip waves, spawn aliens, give gear or perks with `gear(key)`, force a supply drop with `drop()`, switch arenas, zoom).
+- `?debug` — exposes `window.__p88` (god mode, skip waves, spawn aliens, give gear or perks with `gear(key)`, force a supply drop with `drop()`, force the next wave's modifier with `mod(key)`, spawn an affixed champion with `champ(type, [affixes])`, read the profile with `profile`, unlock every kit with `unlockAll()`, switch arenas, zoom).
