@@ -637,6 +637,15 @@ window.AudioEngine = (() => {
       return musicMuted;
     },
     get musicMuted() { return musicMuted; },
+    // briefly pull the music down so a big moment (wave call, boss, death) cuts through
+    duck(depth = 0.35, hold = 0.25, release = 0.6) {
+      if (!ctx || musicMuted) return;
+      const g = musicBus.gain, now = ctx.currentTime, base = MUSIC_VOL * musicLevel;
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(g.value, now);
+      g.setTargetAtTime(base * depth, now, 0.03);
+      g.setTargetAtTime(base, now + hold, release / 3);
+    },
     setVolumes(m, fx) {
       musicLevel = m; sfxLevel = fx;
       if (!ctx) return;
