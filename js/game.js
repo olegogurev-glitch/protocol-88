@@ -297,8 +297,10 @@
 
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth; H = window.innerHeight;
-    cvs.width = Math.floor(W * DPR); cvs.height = Math.floor(H * DPR);
+    // a hidden or minimised window can report 0x0; a zero-size canvas makes every
+    // drawImage(cvs) in the post-FX throw, so never go below one pixel
+    W = Math.max(1, window.innerWidth); H = Math.max(1, window.innerHeight);
+    cvs.width = Math.max(1, Math.floor(W * DPR)); cvs.height = Math.max(1, Math.floor(H * DPR));
     cvs.style.width = W + 'px'; cvs.style.height = H + 'px';
     dark.width = Math.ceil(W * DS); dark.height = Math.ceil(H * DS);
     VIEW = VIEW_BASE = clamp(Math.min(W / 1400, H / 880), 0.68, 1.4);
@@ -4105,6 +4107,7 @@
   // ======================================================================= loop
   let lastFrame = performance.now();
   function frame(now) {
+    requestAnimationFrame(frame); // first, so one frame that throws can't stop the game for good
     const rdt = Math.min(0.05, (now - lastFrame) / 1000);
     lastFrame = now;
     if (slowT > 0) { slowT -= rdt; if (slowT <= 0) timeScale = 1; }
@@ -4133,7 +4136,6 @@
     }
     postScreen(rdt);
     drawCursor();
-    requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 
