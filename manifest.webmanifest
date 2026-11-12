@@ -1,0 +1,11 @@
+{
+  "name": "Protocol 88",
+  "short_name": "Protocol 88",
+  "description": "A fast top-down alien wave shooter.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#000000",
+  "theme_color": "#000000"
+}

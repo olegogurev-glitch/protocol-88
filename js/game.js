@@ -80,6 +80,18 @@
 
   // ======================================================================= screen
   let W = 0, H = 0, DPR = 1, VIEW = 1, VIEW_BASE = 1;
+  // phones and tablets: primary pointer is a finger. Drives layout (zoom, UI scale, render
+  // resolution, landscape lock); the on-screen controls follow touch.using instead.
+  const TOUCH = (() => { try { return matchMedia('(pointer: coarse)').matches && 'ontouchstart' in window; } catch (e) { return false; } })();
+  let UIS = 1; // screen-UI scale: HUD and menus are drawn at UIS and laid out in W/UIS x H/UIS
+  const safe = { l: 0, r: 0, t: 0, b: 0 }; // notch / home-indicator insets in CSS px
+  const safeProbe = document.getElementById('safe');
+  function readSafe() {
+    if (!safeProbe) return;
+    const cs = getComputedStyle(safeProbe);
+    safe.l = parseFloat(cs.paddingLeft) || 0; safe.r = parseFloat(cs.paddingRight) || 0;
+    safe.t = parseFloat(cs.paddingTop) || 0; safe.b = parseFloat(cs.paddingBottom) || 0;
+  }
   const dark = document.createElement('canvas');
   const dctx = dark.getContext('2d');
   const DS = 0.5;
@@ -296,17 +308,23 @@
   }
 
   function resize() {
-    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    DPR = Math.min(window.devicePixelRatio || 1, TOUCH ? 1.5 : 2); // phones: bloom and lighting at 3x DPR cost too much
     // a hidden or minimised window can report 0x0; a zero-size canvas makes every
     // drawImage(cvs) in the post-FX throw, so never go below one pixel
     W = Math.max(1, window.innerWidth); H = Math.max(1, window.innerHeight);
     cvs.width = Math.max(1, Math.floor(W * DPR)); cvs.height = Math.max(1, Math.floor(H * DPR));
     cvs.style.width = W + 'px'; cvs.style.height = H + 'px';
     dark.width = Math.ceil(W * DS); dark.height = Math.ceil(H * DS);
-    VIEW = VIEW_BASE = clamp(Math.min(W / 1400, H / 880), 0.68, 1.4);
+    // a phone in landscape is ~850x390: zoom out further so aliens don't arrive from off-screen at once
+    VIEW = VIEW_BASE = TOUCH ? clamp(Math.min(W / 1150, H / 680), 0.5, 1.2) : clamp(Math.min(W / 1400, H / 880), 0.68, 1.4);
+    UIS = TOUCH ? clamp(Math.min(H / 500, W / 900), 0.6, 1) : 1;
+    readSafe();
     postResize();
+    if (typeof onResizeHook === 'function') onResizeHook();
   }
+  let onResizeHook = null;
   addEventListener('resize', resize);
+  addEventListener('orientationchange', () => setTimeout(resize, 250)); // iOS reports the new size late
   resize();
 
   // ======================================================================= storage
@@ -1100,10 +1118,12 @@
     if (keys.KeyA || keys.ArrowLeft) mx -= 1;
     if (keys.KeyD || keys.ArrowRight) mx += 1;
     if (pad.move[0] || pad.move[1]) { mx = pad.move[0]; my = pad.move[1]; }
+    if (touch.move[0] || touch.move[1]) { mx = touch.move[0]; my = touch.move[1]; }
     const ml = Math.hypot(mx, my);
     if (ml > 1) { mx /= ml; my /= ml; }
-    if (pad.using && pad.connected) {
-      if (pad.aimActive) p.angle = pad.aim;
+    if (touch.using || (pad.using && pad.connected)) {
+      if (touch.aimActive) p.angle = assistAim(p, touch.aim);
+      else if (pad.connected && pad.aimActive) p.angle = pad.aim;
       else if (ml > 0.3) p.angle += angDiff(p.angle, Math.atan2(my, mx)) * Math.min(1, dt * 10);
       // park the virtual cursor ahead of the soldier so camera look-ahead and crosshair follow the stick
       mouse.x = (p.x + Math.cos(p.angle) * 230 - cam.x) * VIEW + W / 2;
@@ -1174,7 +1194,7 @@
     collidePillars(p); clampArena(p);
 
     const w = WEAPONS[p.cur], st = p.ws[p.cur];
-    const firing = mouse.down || (pad.connected && pad.fire);
+    const firing = mouse.down || (pad.connected && pad.fire) || touch.fire;
     if (w.spin) p.spin = firing ? Math.min(1, p.spin + dt * 1.8) : Math.max(0, p.spin - dt * 1.5);
     if (!firing || p.dash > 0) { p.fireCd = Math.max(0, p.fireCd - dt); return; }
     p.fireCd -= dt;
@@ -2626,11 +2646,17 @@
   }
 
   function setPaused(on) {
-    if (on && state === 'play') { state = 'paused'; A.suspend(); mouse.down = false; }
+    if (on && state === 'play') { state = 'paused'; A.suspend(); mouse.down = false; touchReset(); }
     else if (!on && state === 'paused') { state = 'play'; A.resume(); lastFrame = performance.now(); }
   }
 
+  // the boot console's answer powers the game on; keyboard, gamepad and clicks route through it
   function powerOn() {
+    if (powered) return;
+    if (boot.active && !boot.accepted) { bootAccept(); return; }
+    powerUp();
+  }
+  function powerUp() {
     if (powered) return;
     powered = true;
     if (A.init()) music('menu', 1, 138);
@@ -2638,7 +2664,11 @@
 
   // ======================================================================= settings
   const settings = { music: 7, sfx: 8, ost: 1, shake: 2, bright: 1, fx: 2, crt: 0 };
-  try { Object.assign(settings, JSON.parse(localStorage.getItem('p88-settings')) || {}); } catch (e) { /* defaults */ }
+  try {
+    const saved = JSON.parse(localStorage.getItem('p88-settings'));
+    if (saved) Object.assign(settings, saved);
+    else if (TOUCH) settings.fx = 1; // phones start on LOW post FX; they can raise it in options
+  } catch (e) { /* defaults */ }
   const OPTS = [
     { key: 'music', label: 'MUSIC VOLUME', max: 10 },
     { key: 'sfx', label: 'SFX VOLUME', max: 10 },
@@ -2702,6 +2732,17 @@
     else return;
     A.sfx('switch');
   }
+  function entryTap(x, y) {
+    const r = (entry.rects || []).find(q => x > q.x && x < q.x + q.w && y > q.y && y < q.y + q.h);
+    if (!r) return false;
+    if (r.kind === 'ok') { confirmEntry(); return true; }
+    entry.pos = r.i;
+    const L = LETTERS.length;
+    if (r.kind === 'up') entry.letters[r.i] = (entry.letters[r.i] + 1) % L;
+    if (r.kind === 'down') entry.letters[r.i] = (entry.letters[r.i] + L - 1) % L;
+    A.sfx('switch');
+    return true;
+  }
   const canRestart = () => overT > 1 && (!entry || entry.done);
 
   // ======================================================================= input
@@ -2729,9 +2770,10 @@
 
   addEventListener('keydown', e => {
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Backspace'].includes(e.code)) e.preventDefault();
+    if (boot.active) { if (!e.repeat) bootKey(e); return; }
     keys[e.code] = true;
     if (e.repeat) return;
-    pad.using = false;
+    pad.using = false; touch.using = false;
     if (state === 'menu') {
       if (dive) return;
       if (!powered) { powerOn(); return; }
@@ -2765,7 +2807,10 @@
     }
   });
   addEventListener('keyup', e => { keys[e.code] = false; });
-  addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; pad.using = false; });
+  addEventListener('mousemove', e => {
+    if (performance.now() - touch.last < 800) return; // browsers fire a fake mousemove after a tap
+    mouse.x = e.clientX; mouse.y = e.clientY; pad.using = false; touch.using = false;
+  });
 
   function clickOptions(x, y) {
     for (const r of optRects) {
@@ -2776,31 +2821,43 @@
     }
     return false;
   }
-  cvs.addEventListener('mousedown', e => {
-    mouse.x = e.clientX; mouse.y = e.clientY;
-    pad.using = false;
+  // menus, pause and game over share one tap/click path; x, y are CSS px
+  const inRect = (r, x, y) => r && x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h;
+  function pointerDown(cx, cy, isTouch) {
+    // UI rects live in the scaled UI space
+    const x = cx / UIS, y = cy / UIS;
     if (state === 'menu') {
-      if (!powered) { powerOn(); return; }
-      if (optionsOpen) { if (!clickOptions(e.clientX, e.clientY)) optionsOpen = false; return; }
-      if (menuOptRect && e.clientX > menuOptRect.x && e.clientX < menuOptRect.x + menuOptRect.w && e.clientY > menuOptRect.y && e.clientY < menuOptRect.y + menuOptRect.h) { optionsOpen = true; return; }
-      const inR = r => r && e.clientX > r.x && e.clientX < r.x + r.w && e.clientY > r.y && e.clientY < r.y + r.h;
-      if (kitRects && inR(kitRects.l)) { cycleKit(-1); return; }
-      if (kitRects && inR(kitRects.r)) { cycleKit(1); return; }
-      if (kitRects && inR(kitRects.box)) return;
+      if (!powered) { if (!isTouch) powerOn(); return; }
+      if (dive) return;
+      if (optionsOpen) { if (!clickOptions(x, y)) optionsOpen = false; return; }
+      if (inRect(menuOptRect, x, y)) { optionsOpen = true; return; }
+      if (kitRects && inRect(kitRects.l, x, y)) { cycleKit(-1); return; }
+      if (kitRects && inRect(kitRects.r, x, y)) { cycleKit(1); return; }
+      if (kitRects && inRect(kitRects.box, x, y)) return;
       deploy();
       return;
     }
     if (state === 'over') {
-      if (entry && !entry.done) { if (overT > 0.6) confirmEntry(); return; }
-      const inR = r => r && e.clientX > r.x && e.clientX < r.x + r.w && e.clientY > r.y && e.clientY < r.y + r.h;
-      if (kitRects && inR(kitRects.l)) { cycleKit(-1); return; }
-      if (kitRects && inR(kitRects.r)) { cycleKit(1); return; }
+      if (entry && !entry.done) {
+        if (overT <= 0.6) return;
+        if (entryTap(x, y)) return;
+        if (!isTouch) confirmEntry(); // mouse: click anywhere confirms, as before
+        return;
+      }
+      if (kitRects && inRect(kitRects.l, x, y)) { cycleKit(-1); return; }
+      if (kitRects && inRect(kitRects.r, x, y)) { cycleKit(1); return; }
       if (canRestart()) deploy();
       return;
     }
-    if (state === 'paused') { if (!clickOptions(e.clientX, e.clientY)) setPaused(false); return; }
+    if (state === 'paused') { if (!clickOptions(x, y)) setPaused(false); return; }
+  }
+  cvs.addEventListener('mousedown', e => {
+    if (performance.now() - touch.last < 800) return; // compatibility mouse event after a tap
+    mouse.x = e.clientX; mouse.y = e.clientY;
+    pad.using = false; touch.using = false;
+    if (state !== 'play') { pointerDown(e.clientX, e.clientY, false); return; }
     if (e.button === 0) mouse.down = true;
-    if (e.button === 2 && state === 'play') dashQueued = true;
+    if (e.button === 2) dashQueued = true;
   });
   addEventListener('mouseup', e => { if (e.button === 0) mouse.down = false; });
   cvs.addEventListener('contextmenu', e => e.preventDefault());
@@ -2862,6 +2919,332 @@
     pad.prev = gp.buttons.map((_, i) => btn(i));
   }
   addEventListener('gamepadconnected', () => { pad.using = true; floatText(player ? player.x : 0, player ? player.y - 40 : 0, 'GAMEPAD CONNECTED', '#5affc8', 9); });
+
+  // ---------------------------------------------------------------- touch (on-screen twin-stick)
+  // left half: floating move stick (double-tap it to dash); right half: floating aim stick that
+  // fires once pushed past its dead zone. Buttons: dash, swap, pause; the weapon bar and the
+  // "bring it on" line under the wave timer are tappable too. Positions are CSS px.
+  const touch = {
+    using: TOUCH, last: -1e9,
+    move: [0, 0], aim: 0, aimActive: false, fire: false,
+    ids: new Map(), // touch identifier -> { role, bx, by, x, y }
+    lastMoveEnd: -1e9, lastMoveX: 0, lastMoveY: 0, flash: {},
+  };
+  const STICK_R = 58;
+  function touchLayout() {
+    const r = W - safe.r - 16, b = H - safe.b - 12, l = safe.l + 16;
+    const top = (hud && hud.rightBottom ? hud.rightBottom * UIS : 80) + 8;
+    return {
+      dash: { x: r - 42, y: b - 150, r: 38 },
+      swap: { x: r - 128, y: b - 200, r: 27 },
+      pause: { x: r - 22, y: top + 22, r: 22 },
+      moveHome: { x: l + 96, y: b - 92 },
+      aimHome: { x: r - 120, y: b - 88 },
+    };
+  }
+  const inCirc = (c, x, y, pad0 = 10) => (x - c.x) ** 2 + (y - c.y) ** 2 < (c.r + pad0) ** 2;
+  function stickVec(t) {
+    let dx = t.x - t.bx, dy = t.y - t.by;
+    const d = Math.hypot(dx, dy);
+    // dragging past the rim pulls the base along, so the thumb never loses the stick
+    if (d > STICK_R) { const k = (d - STICK_R) / d; t.bx += dx * k; t.by += dy * k; dx = t.x - t.bx; dy = t.y - t.by; }
+    return [dx / STICK_R, dy / STICK_R];
+  }
+  function touchStick(t) {
+    const [vx, vy] = stickVec(t), m = Math.hypot(vx, vy);
+    if (t.role === 'move') {
+      if (m < 0.12) touch.move = [0, 0];
+      else { const k = Math.min(1, (m - 0.12) / 0.75) / m; touch.move = [vx * k, vy * k]; }
+    } else if (t.role === 'aim') {
+      touch.aimActive = m > 0.22;
+      touch.fire = touch.aimActive;
+      if (touch.aimActive) touch.aim = Math.atan2(vy, vx);
+    }
+  }
+  // a gentle pull toward the alien nearest the aim line: thumbs are much less precise than a mouse
+  function assistAim(p, a) {
+    let best = null, bd = 0.2;
+    for (const e of enemies) {
+      if (e.dead || e.under || (e.type === 'phantom' && e.cloaked)) continue;
+      const dx = e.x - p.x, dy = e.y - p.y;
+      if (dx * dx + dy * dy > 720 * 720) continue;
+      const ea = Math.atan2(dy, dx), da = Math.abs(angDiff(a, ea));
+      if (da < bd) { bd = da; best = ea; }
+    }
+    return best === null ? a : a + angDiff(a, best) * 0.6;
+  }
+  function touchStart(e) {
+    e.preventDefault();
+    touch.last = performance.now();
+    if (!touch.using) { touch.using = true; pad.using = false; }
+    if (state !== 'play' && wantFS && !isFS()) goFullscreen().then(ok => { if (ok) lockLandscape(); });
+    for (const ct of e.changedTouches) {
+      const x = ct.clientX, y = ct.clientY;
+      if (state !== 'play') {
+        if (touch.ids.size === 0) pointerDown(x, y, true);
+        touch.ids.set(ct.identifier, { role: 'ui', bx: x, by: y, x, y });
+        continue;
+      }
+      const L = touchLayout(), ux = x / UIS, uy = y / UIS;
+      const take = role => touch.ids.set(ct.identifier, { role, bx: x, by: y, x, y });
+      if (inCirc(L.pause, x, y)) { take('btn'); setPaused(true); continue; }
+      if (inCirc(L.dash, x, y, 14)) { take('btn'); dashQueued = true; touch.flash.dash = 0.15; continue; }
+      if (inCirc(L.swap, x, y)) { take('btn'); cycleWeapon(1); touch.flash.swap = 0.15; continue; }
+      if (hud && inRect(hud.callRect, ux, uy)) { take('btn'); earlyCall(); continue; }
+      const slot = hud && hud.slotRects && hud.slotRects.find(r => inRect(r, ux, uy));
+      if (slot) { take('btn'); selectWeapon(slot.i); continue; }
+      const roles = [...touch.ids.values()].map(t => t.role);
+      if (x < W / 2 && !roles.includes('move')) {
+        const now = performance.now();
+        if (now - touch.lastMoveEnd < 280 && Math.hypot(x - touch.lastMoveX, y - touch.lastMoveY) < 70) dashQueued = true;
+        // keep the base far enough from the edges that the whole stick fits
+        take('move');
+        const t = touch.ids.get(ct.identifier);
+        t.bx = clamp(x, safe.l + STICK_R + 6, W / 2 - STICK_R); t.by = clamp(y, STICK_R + 6, H - safe.b - STICK_R - 6);
+        touchStick(t);
+      } else if (x >= W / 2 && !roles.includes('aim')) {
+        take('aim');
+        const t = touch.ids.get(ct.identifier);
+        t.bx = clamp(x, W / 2 + STICK_R, W - safe.r - STICK_R - 6); t.by = clamp(y, STICK_R + 6, H - safe.b - STICK_R - 6);
+        touchStick(t);
+      } else take('btn');
+    }
+  }
+  function touchMove(e) {
+    e.preventDefault();
+    touch.last = performance.now();
+    for (const ct of e.changedTouches) {
+      const t = touch.ids.get(ct.identifier);
+      if (!t) continue;
+      t.x = ct.clientX; t.y = ct.clientY;
+      if (t.role === 'move' || t.role === 'aim') touchStick(t);
+    }
+  }
+  function touchEnd(e) {
+    e.preventDefault();
+    touch.last = performance.now();
+    for (const ct of e.changedTouches) {
+      const t = touch.ids.get(ct.identifier);
+      if (!t) continue;
+      touch.ids.delete(ct.identifier);
+      if (t.role === 'move') { touch.move = [0, 0]; touch.lastMoveEnd = performance.now(); touch.lastMoveX = t.x; touch.lastMoveY = t.y; }
+      if (t.role === 'aim') { touch.aimActive = false; touch.fire = false; }
+    }
+  }
+  function touchReset() { touch.ids.clear(); touch.move = [0, 0]; touch.aimActive = false; touch.fire = false; }
+  cvs.addEventListener('touchstart', touchStart, { passive: false });
+  cvs.addEventListener('touchmove', touchMove, { passive: false });
+  cvs.addEventListener('touchend', touchEnd, { passive: false });
+  cvs.addEventListener('touchcancel', touchEnd, { passive: false });
+
+  function drawTouch(rdt) {
+    if (!touch.using || state !== 'play' || !player) return;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const L = touchLayout();
+    for (const k in touch.flash) touch.flash[k] = Math.max(0, touch.flash[k] - rdt);
+    const active = role => [...touch.ids.values()].find(t => t.role === role);
+    const stick = (role, home, color, label) => {
+      const t = active(role);
+      const bx = t ? t.bx : home.x, by = t ? t.by : home.y;
+      ctx.globalAlpha = t ? 0.9 : 0.32;
+      ctx.fillStyle = 'rgba(8,4,22,0.35)'; ctx.beginPath(); ctx.arc(bx, by, STICK_R, 0, TAU); ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(bx, by, STICK_R, 0, TAU); ctx.stroke();
+      let kx = bx, ky = by;
+      if (t) { const d = Math.hypot(t.x - bx, t.y - by), k = d > STICK_R ? STICK_R / d : 1; kx = bx + (t.x - bx) * k; ky = by + (t.y - by) * k; }
+      ctx.fillStyle = hexA(color, t ? 0.45 : 0.25); ctx.beginPath(); ctx.arc(kx, ky, 25, 0, TAU); ctx.fill();
+      ctx.strokeStyle = color; ctx.beginPath(); ctx.arc(kx, ky, 25, 0, TAU); ctx.stroke();
+      if (!t) utext(label, bx, by + STICK_R + 8, 10, color, 'center', 'top', 700, 2);
+      ctx.globalAlpha = 1;
+    };
+    stick('move', L.moveHome, '#5affc8', 'MOVE');
+    stick('aim', L.aimHome, '#ff7ad8', 'AIM + FIRE');
+    const p = player;
+    const btn = (c, color, label, alpha, fill = 1) => {
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = 'rgba(8,4,22,0.5)'; ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, TAU); ctx.fill();
+      if (fill < 1) { ctx.fillStyle = hexA(color, 0.2); ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.arc(c.x, c.y, c.r, -Math.PI / 2, -Math.PI / 2 + TAU * fill); ctx.closePath(); ctx.fill(); }
+      ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(c.x, c.y, c.r, -Math.PI / 2, -Math.PI / 2 + TAU * fill); ctx.stroke();
+      if (label) utext(label, c.x, c.y + 1, Math.round(c.r * 0.36), color, 'center', 'middle', 700, 1);
+      ctx.globalAlpha = 1;
+    };
+    const dashMax = 1.0 - 0.15 * p.gear.boots, dr = clamp(1 - p.dashCd / dashMax, 0, 1);
+    btn(L.dash, dr >= 1 ? '#5ad1ff' : '#3a7a9a', 'DASH', touch.flash.dash > 0 ? 1 : dr >= 1 ? 0.85 : 0.55, dr);
+    const owned = p.ws.filter(st => st.owned && st.ammo > 0).length;
+    btn(L.swap, '#ffd23a', 'SWAP', owned > 1 ? (touch.flash.swap > 0 ? 1 : 0.7) : 0.25);
+    btn(L.pause, '#ff7ad8', '', 0.7);
+    ctx.fillStyle = '#ff7ad8'; ctx.globalAlpha = 0.85;
+    ctx.fillRect(L.pause.x - 6, L.pause.y - 7, 4, 14); ctx.fillRect(L.pause.x + 2, L.pause.y - 7, 4, 14);
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------------------------------------------------------------- fullscreen + landscape
+  const docEl = document.documentElement;
+  const canFS = !!(docEl.requestFullscreen || docEl.webkitRequestFullscreen);
+  const isFS = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  let wantFS = false;
+  function goFullscreen() {
+    if (!canFS) return Promise.resolve(false);
+    if (isFS()) return Promise.resolve(true);
+    try {
+      const r = docEl.requestFullscreen ? docEl.requestFullscreen({ navigationUI: 'hide' }) : docEl.webkitRequestFullscreen();
+      return Promise.resolve(r).then(() => true, () => false);
+    } catch (e) { return Promise.resolve(false); }
+  }
+  // only works in fullscreen, and not at all on iPhone: then we ask the player to turn the device
+  function lockLandscape() {
+    try {
+      if (screen.orientation && screen.orientation.lock) return screen.orientation.lock('landscape').then(() => true, () => false);
+    } catch (e) { /* unsupported */ }
+    return Promise.resolve(false);
+  }
+  const rotateEl = document.getElementById('rotate');
+  let booted = false;
+  function checkOrientation() {
+    const need = TOUCH && booted && innerHeight > innerWidth;
+    if (rotateEl) rotateEl.classList.toggle('on', need);
+    if (need) { if (state === 'play') setPaused(true); touchReset(); }
+  }
+
+  // ======================================================================= boot console
+  // "PROTOCOL NUMBER:" with a single answer, 88. The tap that answers it is the user gesture
+  // the browser needs for audio, fullscreen and the landscape lock; on a phone held upright the
+  // console then turns a quarter and the device follows it into landscape.
+  const bootEl = document.getElementById('boot');
+  const bootScr = document.getElementById('bootScreen');
+  const bootLog = document.getElementById('bootLog');
+  const boot = { active: !!bootEl, ready: false, accepted: false, digits: 0, waitLand: false, timers: [], skip: null };
+  const BOOT_LINES = [
+    ['P88 TACTICAL OS  v8.8', 'hot'],
+    ['(C) 2088 ORBITAL DEFENSE CMD', 'dim'],
+    ['', ''],
+    ['MEMORY CHECK ........ OK', ''],
+    ['WEAPON UPLINK ....... OK', ''],
+    ['HOSTILE SIGNATURES .. 4812', 'warn'],
+    ['', ''],
+    ['> AUTHORIZATION REQUIRED', ''],
+  ];
+  const bootLater = (fn, ms) => boot.timers.push(setTimeout(fn, ms));
+  function bootLine(str, cls) {
+    const el = document.createElement('div');
+    if (cls) el.className = cls;
+    el.textContent = str || ' ';
+    bootLog.appendChild(el);
+    return el;
+  }
+  function bootPromptOn() {
+    if (boot.ready) return;
+    boot.ready = true;
+    for (const t of boot.timers) clearTimeout(t);
+    boot.timers = [];
+    bootLog.textContent = '';
+    for (const [str, cls] of BOOT_LINES) bootLine(str, cls);
+    document.getElementById('bootPrompt').classList.add('on');
+    document.getElementById('bootHint').textContent = TOUCH ? 'TAP TO ANSWER' : 'TYPE 88 OR CLICK';
+    bootLater(() => { document.getElementById('bootAnswer').classList.add('on'); if (!TOUCH) document.getElementById('boot88').focus({ preventScroll: true }); }, 220);
+  }
+  function bootType() {
+    // types the log a character at a time; any tap or key skips straight to the prompt
+    let li = 0, ci = 0, el = null;
+    const step = () => {
+      if (boot.ready) return;
+      if (li >= BOOT_LINES.length) { bootPromptOn(); return; }
+      const [str, cls] = BOOT_LINES[li];
+      if (!el) el = bootLine('', cls);
+      if (ci < str.length) { ci = Math.min(str.length, ci + 2); el.textContent = str.slice(0, ci); bootLater(step, 16); }
+      else { li++; ci = 0; el = null; bootLater(step, str ? 110 : 40); }
+    };
+    bootLater(step, 350);
+  }
+  function bootInput(str) { document.getElementById('bootInput').textContent = str; }
+  function bootKey(e) {
+    e.preventDefault();
+    if (boot.accepted) return;
+    if (!boot.ready) { bootPromptOn(); return; }
+    if (e.key === '8') { boot.digits++; bootInput('88'.slice(0, boot.digits)); if (boot.digits >= 2) bootAccept(); }
+    else if (e.code === 'Enter' || e.code === 'Space') bootAccept();
+    else if (e.code === 'Backspace') { boot.digits = 0; bootInput(''); }
+  }
+  function bootAccept() {
+    if (!boot.active || boot.accepted) return;
+    boot.accepted = true;
+    // still inside the tap / key handler: fullscreen has to be asked for right now
+    const fsP = TOUCH ? (wantFS = canFS, goFullscreen()) : Promise.resolve(false);
+    bootPromptOn();
+    document.getElementById('boot88').classList.add('hit');
+    document.getElementById('bootAnswer').classList.remove('on');
+    // the answered prompt becomes a log line, so the replies print under it
+    document.getElementById('bootPrompt').style.display = 'none';
+    bootLine('> PROTOCOL NUMBER: 88', 'hot');
+    powerUp();
+    A.sfx('switch');
+    const turn = TOUCH && innerHeight > innerWidth;
+    setTimeout(() => bootLine('> ACCESS GRANTED', 'hot'), 160);
+    setTimeout(() => bootLine(turn ? '> SWITCHING TO COMBAT VIEW' : '> DEPLOYING PROTOCOL 88', ''), 420);
+    if (!turn) {
+      fsP.then(ok => { if (ok) lockLandscape(); });
+      setTimeout(bootOff, 900);
+      return;
+    }
+    setTimeout(() => {
+      // the console's box takes landscape proportions and turns a quarter clockwise, which is
+      // how landscape looks on a phone still held upright
+      A.sfx('dash');
+      bootScr.style.width = innerHeight + 'px'; bootScr.style.height = innerWidth + 'px';
+      bootScr.classList.add('rot');
+    }, 760);
+    setTimeout(() => {
+      boot.waitLand = true;
+      if (innerWidth > innerHeight) { bootLanded(); return; }
+      fsP.then(ok => (ok ? lockLandscape() : false)).then(locked => {
+        // no lock (iPhone, or fullscreen refused): the player turns the phone themselves
+        setTimeout(() => { if (boot.waitLand) bootLine(locked ? '> ROTATING...' : '> ROTATE DEVICE  >>', 'warn'); }, locked ? 600 : 0);
+      });
+    }, 1700);
+  }
+  // the screen is landscape now: drop the CSS turn in the same frame, so the console stays put
+  function bootLanded() {
+    if (!boot.waitLand) return;
+    boot.waitLand = false;
+    bootScr.classList.add('snap');
+    bootScr.classList.remove('rot');
+    bootScr.style.width = bootScr.style.height = '';
+    void bootScr.offsetWidth;
+    bootScr.classList.remove('snap');
+    setTimeout(bootOff, 450);
+  }
+  function bootOff() {
+    A.sfx('thud');
+    bootScr.classList.add('off');
+    bootEl.classList.add('gone');
+    setTimeout(() => {
+      bootEl.classList.add('hidden');
+      boot.active = false; booted = true;
+      checkOrientation();
+    }, 800);
+  }
+  function bootSkip() {
+    if (!bootEl) return;
+    for (const t of boot.timers) clearTimeout(t);
+    bootEl.classList.add('hidden');
+    boot.active = false; boot.accepted = true; booted = true;
+  }
+  onResizeHook = () => {
+    if (boot.waitLand && innerWidth > innerHeight) bootLanded();
+    else if (bootScr && bootScr.classList.contains('rot')) { bootScr.style.width = innerHeight + 'px'; bootScr.style.height = innerWidth + 'px'; }
+    checkOrientation();
+  };
+  if (bootEl) {
+    if (NO_SAVE) bootSkip(); // ?bot runs straight into the game
+    else {
+      document.getElementById('boot88').addEventListener('click', e => { e.preventDefault(); if (boot.ready) bootAccept(); else bootPromptOn(); });
+      bootEl.addEventListener('pointerdown', e => {
+        if (e.pointerType === 'touch') { touch.last = performance.now(); touch.using = true; }
+        if (!boot.ready) bootPromptOn();
+      });
+      bootEl.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+      bootType();
+    }
+  } else booted = true;
 
   // ======================================================================= update
   function update(dt, rdt) {
@@ -4421,6 +4804,9 @@
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     const p = player;
     const small = W < 900;
+    // notch / home-indicator insets in UI units; tap targets are rebuilt every frame
+    const SL = safe.l / UIS, SR = safe.r / UIS, SB = safe.b / UIS;
+    hud.callRect = null; hud.slotRects = [];
 
     // vignettes
     if (hurtFlash > 0 || (p.hp < 35 && state === 'play')) {
@@ -4467,7 +4853,7 @@
     const rows = chips.length ? chips[chips.length - 1].row + 1 : 0;
     const ch = 64 + (rows ? rows * 28 + 4 : 0);
     const jit = hurtFlash > 0.05 ? Math.sin(gameTime * 90) * hurtFlash * 3 : 0;
-    const hx = 16 + jit, hy = 16;
+    const hx = 16 + SL + jit, hy = 16;
     hudPanel(hx, hy, cw, ch, '#ff4f8a');
     const hc = frac > 0.6 ? '#3dff9a' : frac > 0.3 ? '#ffd23a' : (Math.sin(gameTime * 12) > 0 ? '#ff3a4a' : '#c01a30');
     utext('VITALS', hx + 12, hy + 9, 11, '#ff8ab0', 'left', 'top', 700, 2);
@@ -4536,7 +4922,17 @@
         }
       } else if (interTimer > 0) {
         utext(`NEXT WAVE IN ${Math.ceil(interTimer)}`, W / 2, sy0, 13, '#7cff9a', 'center', 'top', 600, 3);
-        if (wave > 0) utext(`${pad.connected && pad.using ? '[X]' : '[F]'}  BRING IT ON${interTimer >= 2.5 ? '  ·  EARN A POWER-UP' : ''}`, W / 2, sy0 + 17, 11, '#ffd23a', 'center', 'top', 700, 2);
+        if (wave > 0) {
+          const lbl = `${touch.using ? 'TAP' : pad.connected && pad.using ? '[X]' : '[F]'}  BRING IT ON${interTimer >= 2.5 ? '  ·  EARN A POWER-UP' : ''}`;
+          if (touch.using && !relo) {
+            // a real button on touch screens
+            ctx.font = ufont(11, 700); ctx.letterSpacing = '2px';
+            const tw = ctx.measureText(lbl).width; ctx.letterSpacing = '0px';
+            hud.callRect = { x: W / 2 - tw / 2 - 16, y: sy0 + 9, w: tw + 32, h: 30 };
+            hudPanel(hud.callRect.x, hud.callRect.y, hud.callRect.w, hud.callRect.h, '#ffd23a', 8);
+            utext(lbl, W / 2, sy0 + 18, 11, '#ffd23a', 'center', 'top', 700, 2);
+          } else utext(lbl, W / 2, sy0 + 17, 11, '#ffd23a', 'center', 'top', 700, 2);
+        }
       }
     }
 
@@ -4549,7 +4945,8 @@
     if (mult > hud.lastMult) hud.multPop = 1;
     hud.lastMult = mult;
     hud.multPop = Math.max(0, hud.multPop - rdt * 3);
-    const sw2 = small ? 172 : 206, sx = W - 16 - sw2, sy = 16, sh = 62;
+    const sw2 = small ? 172 : 206, sx = W - 16 - SR - sw2, sy = 16, sh = 62;
+    hud.rightBottom = sy + sh; // the touch pause button sits under the right-hand cards
     hudPanel(sx, sy, sw2, sh, '#5ad1ff');
     utext('SCORE', sx + 12, sy + 9, 11, '#7ae0ff', 'left', 'top', 700, 2);
     const sc = String(Math.round(hud.scoreShown)).padStart(8, '0');
@@ -4567,9 +4964,10 @@
       ctx.fillStyle = hexA(mc, 0.85); ctx.fillRect(sx + 1, sy + sh - 3, (sw2 - 11) * cf, 2);
     }
 
-    // ---- minimap
-    if (!small) {
+    // ---- minimap (left out on short touch screens, where that corner belongs to the buttons)
+    if (!small && !(TOUCH && H < 640)) {
       const mw = sw2, mh = (mw * AH) / AW, mx = sx, my = sy + sh + 8;
+      hud.rightBottom = my + mh + 20;
       hudPanel(mx, my, mw, mh, '#ff3af0', 8);
       const k = mw / AW;
       ctx.save();
@@ -4609,8 +5007,10 @@
       own.push(i);
       if (!hud.owned[i]) { hud.owned[i] = true; hud.slotT[i] = 0; }
     });
-    const bwS = Math.min(small ? 76 : 94, (W - 32) / Math.max(1, own.length)), bh = small ? 46 : 52;
-    const bx0 = W / 2 - (own.length * bwS) / 2, by = H - bh - 14;
+    // on touch the bar stays between the two thumb zones
+    const barRoom = touch.using ? W - 2 * (190 / UIS) : W - 32;
+    const bwS = Math.min(small ? 76 : 94, barRoom / Math.max(1, own.length)), bh = small ? 46 : 52;
+    const bx0 = W / 2 - (own.length * bwS) / 2, by = H - bh - 14 - SB;
     own.forEach((i, j) => {
       const tx2 = bx0 + j * bwS;
       hud.slotX[i] = hud.slotX[i] === undefined ? tx2 : lerp(hud.slotX[i], tx2, Math.min(1, rdt * 12));
@@ -4621,6 +5021,7 @@
       const w = WEAPONS[i], st = p.ws[i], cur = i === p.cur;
       const t = hud.slotT[i], e = 1 - Math.pow(1 - t, 3);
       const x = hud.slotX[i] + 2, y = by - hud.raise[i] * 6 + (1 - e) * 40, ww = bwS - 4;
+      hud.slotRects.push({ i, x, y: by - 6, w: ww, h: bh + 6 });
       ctx.save();
       ctx.globalAlpha = e;
       hudPanel(x, y, ww, bh, cur ? w.color : null, 8);
@@ -4630,9 +5031,16 @@
         ctx.fillStyle = g; ctx.fillRect(x, y + 2, ww - 8, bh - 2);
       }
       if (t < 1) { ctx.fillStyle = `rgba(255,255,255,${((1 - t) * 0.6).toFixed(3)})`; ctx.fillRect(x, y, ww, bh); }
-      text(String((i + 1) % 10), x + 6, y + 6, 7, cur ? w.color : '#6a6a88', 'left', 'top', false);
-      for (let l = 0; l < st.lvl; l++) { ctx.fillStyle = '#5ad1ff'; ctx.fillRect(x + ww - 14 - l * 5, y + 6, 3, 3); }
-      utext(w.short, x + ww / 2, y + 17, small ? 11 : 12, cur ? '#ffffff' : '#a8a8c4', 'center', 'top', 700, 1);
+      if (ww < 64) {
+        // narrow slots (a full touch bar): big slot number in the gun's colour, the current gun's name above the bar
+        for (let l = 0; l < st.lvl; l++) { ctx.fillStyle = '#5ad1ff'; ctx.fillRect(x + ww / 2 - 6 + l * 5, y + 5, 3, 3); }
+        text(String((i + 1) % 10), x + ww / 2, y + 14, 11, cur ? w.color : hexA(w.color, 0.55), 'center', 'top', false);
+        if (cur) utext(w.short, x + ww / 2, y - 16, 11, w.color, 'center', 'top', 700, 1);
+      } else {
+        text(String((i + 1) % 10), x + 6, y + 6, 7, cur ? w.color : '#6a6a88', 'left', 'top', false);
+        for (let l = 0; l < st.lvl; l++) { ctx.fillStyle = '#5ad1ff'; ctx.fillRect(x + ww - 14 - l * 5, y + 6, 3, 3); }
+        utext(w.short, x + ww / 2, y + 17, small ? 11 : 12, cur ? '#ffffff' : '#a8a8c4', 'center', 'top', 700, 1);
+      }
       const inf = st.ammo === Infinity;
       const lowA = !inf && st.ammo < w.ammoMax * 0.2;
       const ac = st.ammo === 0 ? '#ff3a4a' : lowA ? '#ffb020' : w.color;
@@ -4679,9 +5087,9 @@
       ctx.restore();
     }
 
-    if (bx0 > 170) utext(A.musicMuted ? 'M  MUSIC OFF' : 'M  MUSIC ON', 16, H - 26, 11, '#5a5a7a', 'left', 'top', 600, 2, false);
+    if (bx0 > 170 && !touch.using) utext(A.musicMuted ? 'M  MUSIC OFF' : 'M  MUSIC ON', 16 + SL, H - 26 - SB, 11, '#5a5a7a', 'left', 'top', 600, 2, false);
 
-    drawNowPlaying(rdt, 16, hy + ch + 10);
+    drawNowPlaying(rdt, 16 + SL, hy + ch + 10);
     if (relo) {
       const a = relo.t < 0.8 ? relo.t / 0.8 : Math.max(0, 1 - (relo.t - 0.8) / 1.0);
       ctx.fillStyle = `rgba(0,0,0,${a.toFixed(3)})`; ctx.fillRect(0, 0, W, H);
@@ -4766,6 +5174,7 @@
   }
 
   function drawCursor() {
+    if (touch.using && !(state === 'play' && touch.aimActive)) return;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     const x = mouse.x, y = mouse.y;
     if (state === 'play' && player) {
@@ -4843,7 +5252,7 @@
     const locked = powered && !kitOpen(KITS[profile.kit] || KITS[0]);
     if (powered) drawKitPicker();
     if (locked) text('KIT LOCKED - PICK ANOTHER', W / 2, H * 0.62, Math.min(14, W / 50), '#ff5a6a', 'center');
-    else if (blink) text(powered ? 'CLICK TO DEPLOY' : 'CLICK TO POWER ON', W / 2, H * 0.62, Math.min(18, W / 40), powered ? '#5affc8' : '#ffffff', 'center');
+    else if (blink) text(powered ? (touch.using ? 'TAP TO DEPLOY' : 'CLICK TO DEPLOY') : 'CLICK TO POWER ON', W / 2, H * 0.62, Math.min(18, W / 40), powered ? '#5affc8' : '#ffffff', 'center');
 
     // attract mode: alternate between controls and the high-score table
     const showScores = Math.floor(menuT / 7) % 2 === 1;
@@ -4851,7 +5260,9 @@
     const cy0 = H * 0.68;
     if (showScores) drawScoreTable(W / 2, cy0, cs);
     else {
-      const lines = pad.connected && pad.using
+      const lines = touch.using
+        ? [['LEFT THUMB', 'MOVE'], ['RIGHT THUMB', 'AIM + FIRE'], ['DASH / DOUBLE-TAP LEFT', 'DASH'], ['SWAP / TAP THE BAR', 'WEAPONS'], ['TAP WAVE TIMER', 'EARLY CALL'], ['II BUTTON', 'PAUSE / OPTIONS']]
+        : pad.connected && pad.using
         ? [['LEFT STICK', 'MOVE'], ['RIGHT STICK', 'AIM + FIRE'], ['RT / RB', 'FIRE'], ['LT / A', 'DASH'], ['Y / D-PAD', 'WEAPONS'], ['X', 'EARLY CALL'], ['START', 'PAUSE / OPTIONS']]
         : [['WASD', 'MOVE'], ['MOUSE', 'AIM'], ['CLICK', 'FIRE'], ['SPACE / RMB', 'DASH'], ['1-0 / WHEEL / Q', 'WEAPONS'], ['F', 'EARLY CALL'], ['ESC', 'PAUSE / OPTIONS'], ['M / N', 'MUSIC / NEXT TRACK']];
       lines.forEach(([k, v], i) => {
@@ -4861,17 +5272,18 @@
     }
     drawNowPlaying(rdt, 16, H - 60);
     // options button
-    const ol = pad.connected && pad.using ? '[Y] OPTIONS' : '[O] OPTIONS';
+    const ol = touch.using ? 'OPTIONS' : pad.connected && pad.using ? '[Y] OPTIONS' : '[O] OPTIONS';
     ctx.font = font(9);
     const ow = ctx.measureText(ol).width + 24;
-    menuOptRect = { x: W - ow - 16, y: H - 44, w: ow, h: 28 };
-    panel(menuOptRect.x, menuOptRect.y, ow, 28, '#ff7ad8');
-    text(ol, menuOptRect.x + ow / 2, menuOptRect.y + 9, 9, '#ff7ad8', 'center', 'top', false);
+    const obh = touch.using ? 40 : 28, oy = H - obh - 16 - safe.b / UIS;
+    menuOptRect = { x: W - ow - 16 - safe.r / UIS, y: oy, w: ow, h: obh };
+    panel(menuOptRect.x, menuOptRect.y, ow, obh, '#ff7ad8');
+    text(ol, menuOptRect.x + ow / 2, menuOptRect.y + obh / 2 - 5, 9, '#ff7ad8', 'center', 'top', false);
     if (optionsOpen) {
       ctx.fillStyle = 'rgba(4,2,12,0.82)'; ctx.fillRect(0, 0, W, H);
       chromeTitle('OPTIONS', W / 2, H * 0.2, Math.min(42, W / 16));
       const bottom = drawOptions(H * 0.3);
-      utext('ESC / CLICK OUTSIDE TO CLOSE', W / 2, Math.max(H * 0.8, bottom + 12), 12, '#8a8ab0', 'center', 'top', 600, 2);
+      utext(touch.using ? 'TAP OUTSIDE TO CLOSE' : 'ESC / CLICK OUTSIDE TO CLOSE', W / 2, Math.max(H * 0.8, bottom + 12), 12, '#8a8ab0', 'center', 'top', 600, 2);
     }
     ctx.globalAlpha = 1;
     if (dk > 0) {
@@ -4903,7 +5315,7 @@
     }
     const pulse = 0.6 + Math.sin(menuT * 6) * 0.4;
     ctx.globalAlpha *= pulse; text('<', x + 22, y + h / 2, 16, '#ffffff', 'center', 'middle'); text('>', x + w - 22, y + h / 2, 16, '#ffffff', 'center', 'middle'); ctx.globalAlpha /= pulse;
-    utext(pad.connected && pad.using ? 'D-PAD / BUMPERS TO CHANGE KIT' : 'A / D OR ARROWS TO CHANGE KIT', W / 2, y + h + 8, 11, '#8a8ab0', 'center', 'top', 600, 2);
+    utext(touch.using ? 'TAP  <  >  TO CHANGE KIT' : pad.connected && pad.using ? 'D-PAD / BUMPERS TO CHANGE KIT' : 'A / D OR ARROWS TO CHANGE KIT', W / 2, y + h + 8, 11, '#8a8ab0', 'center', 'top', 600, 2);
     kitRects = { l: { x, y, w: 64, h }, r: { x: x + w - 64, y, w: 64, h }, box: { x, y, w, h } };
   }
 
@@ -4938,7 +5350,7 @@
       else for (let k = 0; k < o.max; k++) { ctx.fillStyle = k < v ? '#ffd23a' : 'rgba(255,255,255,0.12)'; ctx.fillRect(vx + 26 + k * 15, y + cy - 8, 11, 16); }
     });
     const bottom = y0 + OPTS.length * (rh + gap);
-    utext('ARROWS / D-PAD TO CHANGE  ·  CLICK LEFT / RIGHT HALF OF A ROW', W / 2, bottom + 4, 12, '#8a8ab0', 'center', 'top', 600, 1);
+    utext(touch.using ? 'TAP THE LEFT / RIGHT HALF OF A ROW TO CHANGE IT' : 'ARROWS / D-PAD TO CHANGE  ·  CLICK LEFT / RIGHT HALF OF A ROW', W / 2, bottom + 4, 12, '#8a8ab0', 'center', 'top', 600, 1);
     return bottom + 20;
   }
 
@@ -4970,11 +5382,14 @@
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.fillStyle = 'rgba(4,2,12,0.78)'; ctx.fillRect(0, 0, W, H);
     chromeTitle('PAUSED', W / 2, H * 0.16, Math.min(48, W / 14));
-    utext(pad.connected && pad.using ? 'START / B TO RESUME' : 'ESC TO RESUME', W / 2, H * 0.16 + 38, 14, '#ffffff', 'center', 'top', 700, 3);
+    utext(touch.using ? 'TAP OUTSIDE TO RESUME' : pad.connected && pad.using ? 'START / B TO RESUME' : 'ESC TO RESUME', W / 2, H * 0.16 + 38, 14, '#ffffff', 'center', 'top', 700, 3);
     const fy = Math.max(H * 0.84, drawOptions(H * 0.27) + 16);
     drawBuild(H * 0.27);
-    utext('WASD MOVE   ·   MOUSE AIM   ·   CLICK FIRE   ·   SPACE DASH   ·   F EARLY CALL', W / 2, fy, 13, '#b8b0d8', 'center', 'top', 600, 1);
-    utext('1-0 / WHEEL / Q WEAPONS   ·   M MUSIC   ·   N NEXT TRACK', W / 2, fy + H * 0.04, 13, '#b8b0d8', 'center', 'top', 600, 1);
+    const help = touch.using
+      ? ['LEFT THUMB MOVE   ·   RIGHT THUMB AIM + FIRE   ·   DASH BUTTON OR DOUBLE-TAP LEFT', 'SWAP OR TAP THE WEAPON BAR   ·   TAP THE WAVE TIMER TO CALL EARLY']
+      : ['WASD MOVE   ·   MOUSE AIM   ·   CLICK FIRE   ·   SPACE DASH   ·   F EARLY CALL', '1-0 / WHEEL / Q WEAPONS   ·   M MUSIC   ·   N NEXT TRACK'];
+    utext(help[0], W / 2, fy, 13, '#b8b0d8', 'center', 'top', 600, 1);
+    utext(help[1], W / 2, fy + Math.max(18, H * 0.04), 13, '#b8b0d8', 'center', 'top', 600, 1);
   }
 
   // ---- run report
@@ -5095,14 +5510,25 @@
     if (entry && !entry.done) {
       text('NEW HIGH SCORE!', W / 2, H * 0.36, Math.min(22, W / 30), Math.sin(overT * 8) > 0 ? '#5affc8' : '#ffffff', 'center');
       text('ENTER YOUR INITIALS', W / 2, H * 0.36 + 36, 10, '#d8d0ff', 'center');
-      const bs = 54, gap = 18, x0 = W / 2 - (3 * bs + 2 * gap) / 2, y = H * 0.36 + 64;
+      const bs = 54, gap = 18, x0 = W / 2 - (3 * bs + 2 * gap) / 2, y = H * 0.36 + 80;
+      // arrows above and below each letter and an OK button, so it works by tap or click too
+      entry.rects = [];
       for (let i = 0; i < 3; i++) {
         const x = x0 + i * (bs + gap), sel = i === entry.pos;
         panel(x, y, bs, bs + 8, sel ? '#5affc8' : 'rgba(255,255,255,0.2)');
         text(LETTERS[entry.letters[i]], x + bs / 2, y + bs / 2 + 4, 30, sel ? '#5affc8' : '#ffffff', 'center', 'middle');
         if (sel && Math.sin(overT * 10) > 0) { ctx.fillStyle = '#5affc8'; ctx.fillRect(x + 10, y + bs, bs - 20, 3); }
+        const ac = sel ? '#5affc8' : '#8a8ab0';
+        ctx.fillStyle = ac;
+        ctx.beginPath(); ctx.moveTo(x + bs / 2, y - 22); ctx.lineTo(x + bs / 2 - 9, y - 10); ctx.lineTo(x + bs / 2 + 9, y - 10); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(x + bs / 2, y + bs + 30); ctx.lineTo(x + bs / 2 - 9, y + bs + 18); ctx.lineTo(x + bs / 2 + 9, y + bs + 18); ctx.closePath(); ctx.fill();
+        entry.rects.push({ i, kind: 'up', x, y: y - 34, w: bs, h: 32 }, { i, kind: 'down', x, y: y + bs + 10, w: bs, h: 32 }, { i, kind: 'box', x, y, w: bs, h: bs + 8 });
       }
-      text(pad.connected && pad.using ? 'D-PAD TO PICK  -  A TO CONFIRM' : 'TYPE OR USE ARROWS  -  ENTER TO CONFIRM', W / 2, y + bs + 40, 8, '#8a8ab0', 'center');
+      const okW = 120, okX = W / 2 - okW / 2, okY = y + bs + 50;
+      panel(okX, okY, okW, 36, '#5affc8');
+      text('OK', W / 2, okY + 18, 12, '#5affc8', 'center', 'middle', false);
+      entry.rects.push({ kind: 'ok', x: okX, y: okY, w: okW, h: 36 });
+      text(touch.using ? 'TAP THE ARROWS TO PICK  -  OK TO CONFIRM' : pad.connected && pad.using ? 'D-PAD TO PICK  -  A TO CONFIRM' : 'TYPE OR USE ARROWS  -  ENTER TO CONFIRM', W / 2, okY + 52, 8, '#8a8ab0', 'center');
       return;
     }
     if (newRecord && Math.sin(overT * 8) > -0.3) text('NEW PERSONAL BEST!', W / 2, H * 0.12 + ts * 0.8 + 24, 10, '#5affc8', 'center');
@@ -5127,10 +5553,16 @@
     text('<', W / 2 - kw / 2, ky + 1, 12, '#ffffff', 'center', 'top');
     text('>', W / 2 + kw / 2, ky + 1, 12, '#ffffff', 'center', 'top');
     kitRects = { l: { x: W / 2 - kw / 2 - 30, y: ky - 12, w: 60, h: 40 }, r: { x: W / 2 + kw / 2 - 30, y: ky - 12, w: 60, h: 40 } };
-    if (canRestart() && Math.sin(overT * 5) > -0.3) text(!open ? 'KIT LOCKED - PICK ANOTHER' : pad.connected && pad.using ? 'PRESS A TO REDEPLOY' : 'CLICK TO REDEPLOY', W / 2, H * 0.88, Math.min(16, W / 45), open ? '#ffffff' : '#ff5a6a', 'center');
+    if (canRestart() && Math.sin(overT * 5) > -0.3) text(!open ? 'KIT LOCKED - PICK ANOTHER' : touch.using ? 'TAP TO REDEPLOY' : pad.connected && pad.using ? 'PRESS A TO REDEPLOY' : 'CLICK TO REDEPLOY', W / 2, H * 0.88, Math.min(16, W / 45), open ? '#ffffff' : '#ff5a6a', 'center');
   }
 
   // ======================================================================= loop
+  // screen UI drawn at UIS: inside, W/H are the scaled layout size and VIEW maps world to it
+  function uiDraw(fn) {
+    const w = W, h = H, d = DPR, v = VIEW;
+    W = w / UIS; H = h / UIS; DPR = d * UIS; VIEW = v / UIS;
+    try { fn(); } finally { W = w; H = h; DPR = d; VIEW = v; }
+  }
   let lastFrame = performance.now();
   function frame(now) {
     requestAnimationFrame(frame); // first, so one frame that throws can't stop the game for good
@@ -5150,15 +5582,18 @@
       update(dt, rdt);
     }
     if (state === 'menu') {
-      drawMenu(rdt);
+      uiDraw(() => drawMenu(rdt));
       postWorld(true);
     } else {
       renderWorld();
       postWorld(false);
-      drawHUD(rdt);
-      if (fadeIn > 0) { ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.fillStyle = `rgba(7,1,14,${Math.pow(fadeIn, 1.6).toFixed(3)})`; ctx.fillRect(0, 0, W, H); }
-      if (state === 'paused') drawPause();
-      if (state === 'over') drawGameOver();
+      uiDraw(() => {
+        drawHUD(rdt);
+        if (fadeIn > 0) { ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.fillStyle = `rgba(7,1,14,${Math.pow(fadeIn, 1.6).toFixed(3)})`; ctx.fillRect(0, 0, W, H); }
+        if (state === 'paused') drawPause();
+        if (state === 'over') drawGameOver();
+      });
+      drawTouch(rdt);
     }
     postScreen(rdt);
     drawCursor();
@@ -5171,7 +5606,8 @@
     get wave() { return wave; },
     get enemies() { return enemies.length; },
     get player() { return player; },
-    start: () => { powerOn(); startGame(); },
+    start: () => { bootSkip(); powerUp(); startGame(); },
+    touch,
     skipTo: n => { spawnQueue = []; for (const e of enemies) e.dead = true; compact(enemies); wave = n - 1; waveActive = false; interTimer = 0.1; },
     god: () => { if (player) { player.hp = 1e9; player.maxHp = 1e9; } },
     list: () => enemies,
