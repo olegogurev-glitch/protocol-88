@@ -2010,11 +2010,12 @@
   }
 
   // ======================================================================= settings
-  const settings = { music: 7, sfx: 8, shake: 2, bright: 1, fx: 2, crt: 0 };
+  const settings = { music: 7, sfx: 8, ost: 1, shake: 2, bright: 1, fx: 2, crt: 0 };
   try { Object.assign(settings, JSON.parse(localStorage.getItem('p88-settings')) || {}); } catch (e) { /* defaults */ }
   const OPTS = [
     { key: 'music', label: 'MUSIC VOLUME', max: 10 },
     { key: 'sfx', label: 'SFX VOLUME', max: 10 },
+    { key: 'ost', label: 'SOUNDTRACK', max: 1, names: ['SYNTH', 'STUDIO'] },
     { key: 'shake', label: 'SCREEN SHAKE', max: 2, names: ['OFF', 'LOW', 'FULL'] },
     { key: 'bright', label: 'BRIGHTNESS', max: 2, names: ['DARK', 'NORMAL', 'BRIGHT'] },
     { key: 'fx', label: 'POST FX', max: 2, names: ['OFF', 'LOW', 'HIGH'] },
@@ -2023,6 +2024,7 @@
   let optSel = 0, optionsOpen = false, optRects = [];
   function applySettings(save = true) {
     if (A.setVolumes) A.setVolumes(settings.music / 7, settings.sfx / 8);
+    if (A.setSoundtrack) A.setSoundtrack(settings.ost ? 'studio' : 'synth');
     if (save) try { localStorage.setItem('p88-settings', JSON.stringify(settings)); } catch (e) { /* ignore */ }
   }
   applySettings(false);

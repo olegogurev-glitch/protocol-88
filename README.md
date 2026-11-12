@@ -1,7 +1,7 @@
 # Protocol 88
 
-A fast top-down alien wave shooter with a procedural 80s rock × 8-bit soundtrack.
-Vanilla JavaScript + Canvas 2D + Web Audio — no build step, no assets.
+A fast top-down alien wave shooter with a licensed 8-bit soundtrack (plus the original procedural 80s rock × 8-bit score as an option).
+Vanilla JavaScript + Canvas 2D + Web Audio — no build step.
 
 ## Run
 
@@ -10,6 +10,8 @@ python3 -m http.server 8088
 ```
 
 Then open <http://localhost:8088>. Click once to power on the audio, again to deploy.
+It has to be served over HTTP: opened as a `file://` page the browser blocks the music files and the game falls back to the synth score.
+Options → Soundtrack switches between STUDIO and SYNTH.
 
 ## Controls
 
@@ -28,8 +30,13 @@ Then open <http://localhost:8088>. Click once to power on the audio, again to de
 
 - `index.html` — page shell. Bump the `?v=` on the script tags after changing code so browsers don't serve stale copies.
 - `js/game.js` — gameplay, rendering, HUD, input.
-- `js/audio.js` — the soundtrack sequencer (8 songs) and all sound effects.
+- `js/audio.js` — the studio soundtrack player, the procedural synth score (8 songs) and all sound effects.
+- `music/` — the studio soundtrack (MP3). Track names, roles and tempos are in the `OST` table in `js/audio.js`; sources in `music/CREDITS.md`.
+  The tracks are licensed stock music (Envato Elements) for use in this game only; they are not licensed for reuse elsewhere.
+  The WAV masters live in `OST/`, which is not in the repo. To rebuild the MP3s from them, run `zsh tools/build-ost.sh` (needs ffmpeg).
+  If the MP3s are missing, the game plays the synth score.
 - `tools/autoplay.js` — balance-testing bot.
+- `tools/build-ost.sh` — converts the WAV masters in `OST/` into `music/*.mp3`.
 
 ## Testing tools
 

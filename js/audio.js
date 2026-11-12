@@ -1,8 +1,10 @@
 'use strict';
 /*
  * PROTOCOL 88 — audio engine
- * Procedural 80s hard rock x 8-bit soundtrack + sound effects. Pure Web Audio, no samples.
- * The sequencer also emits beat events the game uses to time alien spawns and visuals,
+ * Two soundtracks + sound effects:
+ *   - studio: licensed tracks streamed from music/*.mp3 (the default)
+ *   - synth:  the procedural 80s hard rock x 8-bit score, pure Web Audio, no samples
+ * Either one emits beat events the game uses to time alien spawns and visuals,
  * so the music literally drives the action.
  */
 window.AudioEngine = (() => {
@@ -100,6 +102,7 @@ window.AudioEngine = (() => {
     leadBus.connect(leadDelay); leadDelay.connect(dlp); dlp.connect(fb); fb.connect(leadDelay);
     dlp.connect(wet); wet.connect(musicBus);
 
+    initStudio();
     nextT = ctx.currentTime + 0.1;
     setInterval(tick, 25);
     return true;
@@ -470,7 +473,7 @@ window.AudioEngine = (() => {
       }
       if (intensity >= S.arpMin) arp(t, lastRoot + 24 + ARP[step % 8], sd * 0.7);
     }
-    if (step % 4 === 0 && beatFn) {
+    if (step % 4 === 0 && beatFn && !studioOn()) {
       const info = { beat: step / 4, bar, kick: kickHit, snare: snareHit, mode };
       const delay = Math.max(0, (t - ctx.currentTime) * 1000);
       setTimeout(() => beatFn(info), delay);
@@ -510,6 +513,7 @@ window.AudioEngine = (() => {
   function tick() {
     if (!ctx || ctx.state !== 'running') return;
     const now = ctx.currentTime;
+    if (studioOn()) studioTick();
     if (nextT < now - 0.05) nextT = now + 0.05;
     while (nextT < now + 0.12) {
       if (step === 0 && pending) applyPending();
@@ -523,15 +527,194 @@ window.AudioEngine = (() => {
     }
   }
 
+  let req = { m: 'off', inten: 1, tempo: undefined }; // what the game last asked for
+
   function setMode(m, inten = 1, tempo) {
     if (!ctx) return;
+    req = { m, inten, tempo };
+    if (studioOn()) { synthOff(); studioMode(m); return; }
     pending = { m, inten, tempo };
     if (m === 'off') applyPending(); // cut immediately rather than waiting for the bar line
   }
 
+  function synthOff() {
+    if (mode === 'off') return;
+    pending = { m: 'off', inten: 1 };
+    applyPending();
+  }
+
   function nextTrack() {
-    if (!ctx || mode === 'off') return;
+    if (!ctx) return;
+    if (studioOn()) { studioNext(); return; }
+    if (mode === 'off') return;
     pending = { m: mode, inten: intensity, tempo: baseBpm, force: true };
+  }
+
+  // ---------------------------------------------------------------- studio soundtrack
+  // Licensed tracks in music/*.mp3 (see music/CREDITS.md). They stream through <audio> elements
+  // routed into the music bus, so volume, ducking and the intermission muffle all still apply.
+  // Every track was exported from bar 1 at 0s on a fixed tempo, so beats (and the alien spawns
+  // hanging off them) come straight from the playback position and stay locked to the song.
+  // Wave tracks play as one continuous playlist across waves; intermissions muffle the current
+  // song instead of cutting it. Boss and menu themes loop.
+  const OST_DIR = 'music/';
+  const T = (file, name, bpm, snare = '0101') => ({ file, name, bpm, snare });
+  const OST = {
+    menu: [T('last-transmission', 'LAST TRANSMISSION', 104)],
+    wave: [
+      T('first-contact', 'FIRST CONTACT', 138),
+      T('lock-and-load', 'LOCK AND LOAD', 133),
+      T('neon-barricade', 'NEON BARRICADE', 135),
+      T('plasma-heart', 'PLASMA HEART', 128, '0010'),
+      T('blackout-protocol', 'BLACKOUT PROTOCOL', 130, '0010'),
+      T('overclock', 'OVERCLOCK', 150),
+      T('starfall', 'STARFALL', 130),
+      T('gravity-well', 'GRAVITY WELL', 135),
+      T('hyperdrive', 'HYPERDRIVE', 135),
+      T('red-sector', 'RED SECTOR', 140),
+    ],
+    boss: [T('iron-queen', 'IRON QUEEN', 130), T('mothership', 'MOTHERSHIP', 150)],
+  };
+  // files are normalised to -14 LUFS; the synth runs hot into the master compressor, so lift
+  // the studio tracks ~7 dB to sit just under it (measured: synth ≈ -20 dB, studio ≈ -22 dB RMS)
+  const STUDIO_GAIN = 2.0;
+  const XFADE = 1.4;
+  let studio = true, studioFailed = location.protocol === 'file:'; // file:// taints media → silence
+  let decks = [], deck = null, studioIn = null, muffle = null, muffleGain = null;
+  let waveIdx = -1, bossIdx = -1, lastBeat = null, freeT = 0, freeBeat = 0, fadeTok = 0;
+
+  function studioOn() { return studio && !studioFailed; }
+
+  function initStudio() {
+    muffle = ctx.createBiquadFilter(); muffle.type = 'lowpass'; muffle.frequency.value = 20000; muffle.Q.value = 0.9;
+    muffleGain = ctx.createGain(); muffleGain.gain.value = 1;
+    studioIn = ctx.createGain(); studioIn.gain.value = STUDIO_GAIN;
+    studioIn.connect(muffle); muffle.connect(muffleGain); muffleGain.connect(musicBus);
+    for (let i = 0; i < 2; i++) {
+      const el = new Audio();
+      el.preload = 'auto';
+      const g = ctx.createGain(); g.gain.value = 0;
+      ctx.createMediaElementSource(el).connect(g); g.connect(studioIn);
+      const d = { el, g, track: null, kind: null, advancing: false, resumeAfter: false };
+      el.addEventListener('error', () => { if (d === deck) studioError(); });
+      el.addEventListener('ended', () => { if (d === deck && d.kind === 'wave') nextWave(); });
+      decks.push(d);
+    }
+    // Safari only lets an element play later if it was first played inside a user gesture
+    // (init runs in one), so warm up the spare deck now; it also preloads the first wave track.
+    if (studioOn()) {
+      const spare = decks[1];
+      spare.el.src = OST_DIR + OST.wave[0].file + '.mp3';
+      spare.el.play().then(() => { if (spare !== deck) spare.el.pause(); }).catch(() => {});
+    }
+  }
+
+  function studioError() {
+    if (studioFailed) return;
+    studioFailed = true;
+    console.warn('[audio] studio soundtrack unavailable, falling back to the synth score');
+    stopDeck();
+    if (req.m !== 'off') pending = { ...req, force: true };
+  }
+
+  function fadeOut(d, dur) {
+    const now = ctx.currentTime, tok = ++fadeTok;
+    d.fadeTok = tok;
+    d.g.gain.cancelScheduledValues(now);
+    d.g.gain.setValueAtTime(d.g.gain.value, now);
+    d.g.gain.linearRampToValueAtTime(0, now + dur);
+    setTimeout(() => { if (d.fadeTok === tok && d !== deck) d.el.pause(); }, dur * 1000 + 100);
+  }
+
+  function stopDeck(dur = 1.6) {
+    if (deck) fadeOut(deck, dur);
+    deck = null;
+  }
+
+  function startTrack(kind, track) {
+    const old = deck;
+    const d = decks[0] === old ? decks[1] : decks[0];
+    d.fadeTok = 0; d.track = track; d.kind = kind; d.advancing = false; d.resumeAfter = false;
+    d.el.loop = kind !== 'wave';
+    const src = OST_DIR + track.file + '.mp3';
+    if (!d.el.src.endsWith(src) || d.el.error) d.el.src = src; // reload a failed preload so its error reaches studioError
+    else d.el.currentTime = 0;
+    const now = ctx.currentTime;
+    d.g.gain.cancelScheduledValues(now);
+    d.g.gain.setValueAtTime(0, now);
+    d.g.gain.linearRampToValueAtTime(1, now + (old ? XFADE : 0.25));
+    d.el.play().catch(() => {});
+    if (old) fadeOut(old, XFADE);
+    deck = d; lastBeat = null;
+    if (trackFn) {
+      const info = { name: track.name, mode: kind === 'boss' ? 'boss' : 'wave', key: 0 };
+      setTimeout(() => trackFn(info), 0);
+    }
+  }
+
+  function nextWave() {
+    if (deck && deck.kind === 'wave') deck.advancing = true;
+    waveIdx = (waveIdx + 1) % OST.wave.length;
+    startTrack('wave', OST.wave[waveIdx]);
+  }
+
+  function setMuffle(on) {
+    const now = ctx.currentTime;
+    muffle.frequency.cancelScheduledValues(now);
+    muffle.frequency.setTargetAtTime(on ? 700 : 20000, now, on ? 0.12 : 0.4);
+    muffleGain.gain.cancelScheduledValues(now);
+    muffleGain.gain.setTargetAtTime(on ? 0.75 : 1, now, 0.2);
+  }
+
+  function studioMode(m) {
+    if (m === 'off') { stopDeck(); setMuffle(false); return; }
+    if (m === 'menu') {
+      if (!deck || deck.kind !== 'menu') startTrack('menu', OST.menu[0]);
+    } else if (m === 'boss') {
+      if (!deck || deck.kind !== 'boss') { bossIdx++; startTrack('boss', OST.boss[bossIdx % OST.boss.length]); }
+    } else if (!deck || deck.kind !== 'wave') {
+      nextWave(); // 'wave' or 'break': the playlist carries on
+    }
+    setMuffle(m === 'break');
+  }
+
+  function studioNext() {
+    if (req.m === 'off' || req.m === 'menu') return;
+    if (req.m === 'boss') { bossIdx++; startTrack('boss', OST.boss[bossIdx % OST.boss.length]); }
+    else nextWave();
+  }
+
+  // called from the scheduler tick: fire a beat event whenever playback crosses a beat line
+  function studioTick() {
+    if (!beatFn) return;
+    const el = deck && deck.el;
+    const now = ctx.currentTime;
+    if (el && !el.paused && el.readyState >= 3) {
+      const tr = deck.track, per = 60 / tr.bpm;
+      if (deck.kind === 'wave' && !deck.advancing && el.duration && el.currentTime > el.duration - 0.6) nextWave();
+      const b = Math.floor(el.currentTime / per);
+      freeT = now; freeBeat = b;
+      if (b === lastBeat) return;
+      lastBeat = b;
+      const i = ((b % 4) + 4) % 4;
+      beatFn({ beat: i, bar: Math.floor(b / 4) % 4, kick: true, snare: tr.snare[i] === '1', mode: req.m });
+    } else {
+      // nothing audible (between songs, buffering, game over): keep a steady pulse going
+      const per = 60 / (deck ? deck.track.bpm : 140);
+      if (now - freeT < per) return;
+      freeT = now; freeBeat++;
+      const i = freeBeat % 4;
+      beatFn({ beat: i, bar: 0, kick: true, snare: i % 2 === 1, mode: req.m });
+    }
+  }
+
+  function setSoundtrack(kind) {
+    const want = kind !== 'synth';
+    if (want === studio) return;
+    studio = want;
+    if (!ctx) return;
+    if (studioOn()) { synthOff(); studioMode(req.m); }
+    else if (!studioFailed) { stopDeck(0.6); setMuffle(false); if (req.m !== 'off') pending = { ...req, force: true }; }
   }
 
   // ---------------------------------------------------------------- SFX
@@ -627,10 +810,26 @@ window.AudioEngine = (() => {
     onBeat(fn) { beatFn = fn; },
     onTrack(fn) { trackFn = fn; },
     nextTrack,
-    get track() { return mode === 'off' ? null : song.name; },
+    setSoundtrack,
+    get soundtrack() { return studioOn() ? 'studio' : 'synth'; },
+    get track() {
+      if (studioOn()) return deck ? deck.track.name : null;
+      return mode === 'off' ? null : song.name;
+    },
     running() { return !!ctx && ctx.state === 'running'; },
-    suspend() { if (ctx) ctx.suspend(); },
-    resume() { if (ctx) ctx.resume(); },
+    suspend() {
+      if (!ctx) return;
+      ctx.suspend();
+      for (const d of decks) if (!d.el.paused) { d.resumeAfter = true; d.el.pause(); }
+    },
+    resume() {
+      if (!ctx) return;
+      ctx.resume();
+      for (const d of decks) {
+        if (d.resumeAfter && d === deck) d.el.play().catch(() => {});
+        d.resumeAfter = false;
+      }
+    },
     toggleMusic() {
       musicMuted = !musicMuted;
       if (ctx) musicBus.gain.setTargetAtTime(musicMuted ? 0 : MUSIC_VOL * musicLevel, ctx.currentTime, 0.05);
