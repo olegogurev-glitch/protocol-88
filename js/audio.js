@@ -10,6 +10,7 @@
 window.AudioEngine = (() => {
   let ctx = null;
   let master, musicBus, sfxBus, guitarBus, leadBus, leadDelay, gatedIn, hallIn;
+  let hostMuted = false; // set by a page embedding the game (e.g. the Pixo site's sound button)
   let noiseBuf, distCurve, pulse25, pulse125;
   let musicMuted = false;
   const MUSIC_VOL = 0.42, SFX_VOL = 0.5;
@@ -63,7 +64,7 @@ window.AudioEngine = (() => {
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -16; comp.knee.value = 12; comp.ratio.value = 5;
     comp.attack.value = 0.002; comp.release.value = 0.2;
-    master = ctx.createGain(); master.gain.value = 0.9;
+    master = ctx.createGain(); master.gain.value = hostMuted ? 0 : 0.9;
     master.connect(comp); comp.connect(ctx.destination);
     musicBus = ctx.createGain(); musicBus.gain.value = musicMuted ? 0 : MUSIC_VOL * musicLevel; musicBus.connect(master);
     sfxBus = ctx.createGain(); sfxBus.gain.value = SFX_VOL * sfxLevel; sfxBus.connect(master);
@@ -840,6 +841,13 @@ window.AudioEngine = (() => {
       return musicMuted;
     },
     get musicMuted() { return musicMuted; },
+    // Mutes music and sound effects together, and stays muted through pause/resume.
+    // For pages that embed the game: frame.contentWindow.AudioEngine.setMuted(true)
+    setMuted(m) {
+      hostMuted = !!m;
+      if (ctx && master) master.gain.setTargetAtTime(hostMuted ? 0 : 0.9, ctx.currentTime, 0.03);
+    },
+    get muted() { return hostMuted; },
     // briefly pull the music down so a big moment (wave call, boss, death) cuts through
     duck(depth = 0.35, hold = 0.25, release = 0.6) {
       if (!ctx || musicMuted) return;
