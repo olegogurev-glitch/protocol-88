@@ -5,6 +5,7 @@
  */
 (() => {
   const A = window.AudioEngine;
+  const I18N = window.I18N, $t = I18N.t; // English source text in, active language out (js/i18n.js)
   const cvs = document.getElementById('game');
   const mainCtx = cvs.getContext('2d');
   let ctx = mainCtx; // swapped temporarily when stamping corpses onto the floor or drawing the actor layer
@@ -12,11 +13,13 @@
   const FONT = '"Press Start 2P", "Courier New", monospace';
   const font = px => `${Math.round(px)}px ${FONT}`;
   // UI: a clean condensed tech face for small labels and numbers; pixel font stays for headlines
-  const UI = '"Chakra Petch", "Arial Narrow", sans-serif';
+  // Chakra Petch has no Cyrillic, so Russian swaps in Tektur, a similar angular tech face
+  const UI_FACES = { en: '"Chakra Petch", "Arial Narrow", sans-serif', ru: '"Tektur", "Arial Narrow", sans-serif' };
+  let UI = UI_FACES[I18N.lang] || UI_FACES.en;
   const ufont = (px, wt = 600) => `${wt} ${Math.round(px)}px ${UI}`;
   if (document.fonts && document.fonts.load) {
     document.fonts.load('16px "Press Start 2P"').catch(() => {});
-    for (const wt of [500, 600, 700]) document.fonts.load(`${wt} 16px "Chakra Petch"`).catch(() => {});
+    for (const wt of [500, 600, 700]) document.fonts.load(`${wt} 16px ${UI.split(',')[0]}`).catch(() => {});
   }
 
   // ======================================================================= utils
@@ -1027,7 +1030,7 @@
   }
 
   function banner(title, sub, color, dur = 2.6, sub2 = '', priority = false) {
-    const b = { title, sub, sub2, color, t: 0, dur };
+    const b = { title: $t(title), sub: $t(sub), sub2: $t(sub2), color, t: 0, dur };
     if (priority && banners.length) banners.splice(0, 1, b);
     else banners.push(b);
     if (banners.length > 4) banners.splice(1, 1);
@@ -1055,7 +1058,7 @@
     }
   }
   function floatText(x, y, text, color, size = 10) {
-    part({ kind: 'text', x, y, vx: 0, vy: -50, life: 1.1, text, color, size, drag: 1.5 });
+    part({ kind: 'text', x, y, vx: 0, vy: -50, life: 1.1, text: $t(text), color, size, drag: 1.5 });
   }
 
   // ======================================================================= player
@@ -1389,8 +1392,8 @@
     }
     if (quiet) return;
     const opened = locked.filter(k => PERKS[k].needs(p));
-    const sub2 = opened.length ? `SYNERGY UNLOCKED: ${opened.map(k => PERKS[k].name).join(', ')}` : isPerk(key) ? 'PERK' : '';
-    banner(info.name, `${info.max > 1 ? `LEVEL ${lvl} - ` : ''}${info.desc}`, info.color, 2.4, sub2, true);
+    const sub2 = opened.length ? $t('SYNERGY UNLOCKED: {0}', opened.map(k => $t(PERKS[k].name)).join(', ')) : isPerk(key) ? 'PERK' : '';
+    banner(info.name, `${info.max > 1 ? $t('LEVEL {0} - ', lvl) : ''}${$t(info.desc)}`, info.color, 2.4, sub2, true);
     A.sfx(isPerk(key) ? 'perk' : 'gear');
     part({ kind: 'ring', x: p.x, y: p.y, vx: 0, vy: 0, life: 0.5, size: 60, color: info.color, glow: true });
     if (isPerk(key)) part({ kind: 'ring', x: p.x, y: p.y, vx: 0, vy: 0, life: 0.7, size: 110, color: info.color, glow: true });
@@ -1711,7 +1714,7 @@
     if (hasAff(e, 'swift')) e.speed *= 1.45;
     if (item.bounty) {
       e.bounty = true; e.bountyT = 45;
-      banner('BOUNTY', `${e.affix.map(k => AFFIX[k].name).join(' ')} ${ET[e.type].name}`, MODS.bounty.color, 2.4, 'KILL IT WITHIN 45 SECONDS', true);
+      banner('BOUNTY', $t('{0} {1}', e.affix.map(k => $t(AFFIX[k].name)).join(' '), $t(ET[e.type].name)), MODS.bounty.color, 2.4, 'KILL IT WITHIN 45 SECONDS', true);
       A.sfx('alarm');
     }
   }
@@ -1770,7 +1773,7 @@
     e.vx = Math.cos(v.a) * 220; e.vy = Math.sin(v.a) * 220; e.angle = v.a;
     if (item.affix) applyAffix(e, item);
     if (isBoss(e)) {
-      banner('WARNING', `${ET[e.type].name} DETECTED`, ET[e.type].color, 2.2, '', true);
+      banner('WARNING', $t('{0} DETECTED', $t(ET[e.type].name)), ET[e.type].color, 2.2, '', true);
       A.sfx('roar'); shake = 20; aberr = Math.max(aberr, 0.6);
       punchZoom(0.12); A.duck(0.25, 0.6, 1); ripple(e.x, e.y, 520, 0.035, 0.7);
     }
@@ -2242,7 +2245,7 @@
     e.enragedFx = true;
     punchZoom(0.11); shake = Math.min(30, shake + 14); aberr = Math.max(aberr, 0.7);
     ripple(e.x, e.y, 560, 0.035, 0.6); A.sfx('roar'); A.duck(0.3, 0.4, 0.8);
-    banner('ENRAGED', `${ET[e.type].name} IS FURIOUS`, ET[e.type].color, 1.8, '', true);
+    banner('ENRAGED', $t('{0} IS FURIOUS', $t(ET[e.type].name)), ET[e.type].color, 1.8, '', true);
   }
   function damageEnemy(e, dmg, kx, ky, knock, src = 'other') {
     if (e.dead || e.under) return;
@@ -2423,7 +2426,7 @@
         const P = POWER[pk.wi];
         if (pk.wi === 'nova') nova();
         else p[pk.wi] = P.dur;
-        floatText(p.x, p.y - 24, P.name + '!', P.color, 12);
+        floatText(p.x, p.y - 24, $t(P.name) + '!', P.color, 12);
         if (pk.wi !== 'nova') A.sfx(pk.wi);
         break;
       }
@@ -2439,7 +2442,7 @@
         st.owned = true;
         st.ammo = w.start;
         selectWeapon(pk.wi, true);
-        banner('NEW WEAPON', w.name, w.color, 2.2, `EQUIPPED - SLOT ${(pk.wi + 1) % 10}`, true);
+        banner('NEW WEAPON', w.name, w.color, 2.2, $t('EQUIPPED - SLOT {0}', (pk.wi + 1) % 10), true);
         A.sfx('weapon');
         shake = Math.min(30, shake + 6);
         break;
@@ -2454,7 +2457,7 @@
           const st = p.ws[i];
           st.lvl++;
           if (WEAPONS[i].ammoMax !== Infinity) st.ammo = WEAPONS[i].ammoMax;
-          banner('WEAPON UPGRADE', `${WEAPONS[i].name} LV ${st.lvl + 1}`, '#5ad1ff', 2, '+25% DAMAGE', true);
+          banner('WEAPON UPGRADE', $t('{0} LV {1}', $t(WEAPONS[i].name), st.lvl + 1), '#5ad1ff', 2, '+25% DAMAGE', true);
         } else {
           score += 2000;
           floatText(p.x, p.y - 24, '+2000', '#5ad1ff', 12);
@@ -2530,10 +2533,10 @@
     }
     punchZoom(boss ? 0.09 : 0.05); A.duck(0.3, 0.35, 0.7);
     const M = waveMod && MODS[waveMod];
-    if (boss) { const bt = ET[ARENA_BOSS[Math.max(0, ARENAS.indexOf(arena))]]; banner(`WAVE ${n}`, bt.intro, bt.color, 2.8); }
-    else if (newType) banner(`WAVE ${n}`, `NEW THREAT: ${ET[newType].name}`, '#ff4f6d', 2.8, M ? `${M.name}: ${M.desc}` : ET[newType].desc);
-    else if (M) banner(`WAVE ${n}`, M.name, M.color, 2.8, M.desc);
-    else banner(`WAVE ${n}`, choose(TAUNTS), '#ff4f6d', 2.4);
+    if (boss) { const bt = ET[ARENA_BOSS[Math.max(0, ARENAS.indexOf(arena))]]; banner($t('WAVE {0}', n), bt.intro, bt.color, 2.8); }
+    else if (newType) banner($t('WAVE {0}', n), $t('NEW THREAT: {0}', $t(ET[newType].name)), '#ff4f6d', 2.8, M ? `${$t(M.name)}: ${$t(M.desc)}` : ET[newType].desc);
+    else if (M) banner($t('WAVE {0}', n), M.name, M.color, 2.8, M.desc);
+    else banner($t('WAVE {0}', n), choose(TAUNTS), '#ff4f6d', 2.4);
     if (waveMod === 'ambush') for (let i = Math.min(spawnQueue.length, 4 + Math.floor(n / 3)); i > 0; i--) spawnFromQueue(spawnQueue.shift());
     if (carrierWeapon(n) !== undefined && !boss) floatText(player.x, player.y - 40, 'A GOLDEN CARRIER HAS A WEAPON', '#ffd23a', 9);
     A.sfx('alarm');
@@ -2549,7 +2552,7 @@
     if (modded) { run.mods++; profile.mods++; checkUnlocks(); }
     saveProfile();
     score += bonus;
-    banner(`WAVE ${wave} CLEARED`, `+${bonus} BONUS`, '#7cff9a', 2.6, modded ? `${MODS[modded].name} SURVIVED - POWER-UP DROPPED` : '');
+    banner($t('WAVE {0} CLEARED', wave), $t('+{0} BONUS', bonus), '#7cff9a', 2.6, modded ? $t('{0} SURVIVED - POWER-UP DROPPED', $t(MODS[modded].name)) : '');
     if (modded && player) spawnPickup('power', player.x + rand(-120, 120), player.y + rand(-120, 120), choose(['overdrive', 'aegis', 'chrono', 'nova']));
     punchZoom(0.035);
     if (player) ripple(player.x, player.y, 700, 0.02, 0.8);
@@ -2595,7 +2598,7 @@
       profile.unlocked.push(k.id);
       if (state === 'play') {
         run.unlocks.push(k.name);
-        banner('KIT UNLOCKED', k.name, k.color, 2.6, `${k.desc} - PICK IT ON THE MENU`, true);
+        banner('KIT UNLOCKED', k.name, k.color, 2.6, $t('{0} - PICK IT ON THE MENU', $t(k.desc)), true);
         A.sfx('weapon');
       }
       saveProfile();
@@ -2629,7 +2632,7 @@
     cam.x = player.x; cam.y = player.y;
     mouse.down = false;
     state = 'play';
-    banner('GET READY', 'SURVIVE AS LONG AS YOU CAN', '#5ad1ff', 2.6, kit.id === 'standard' ? '' : `${kit.name} KIT - ${kit.desc}`);
+    banner('GET READY', 'SURVIVE AS LONG AS YOU CAN', '#5ad1ff', 2.6, kit.id === 'standard' ? '' : $t('{0} KIT - {1}', $t(kit.name), $t(kit.desc)));
     music('break', 1, 140);
   }
 
@@ -2663,12 +2666,13 @@
   }
 
   // ======================================================================= settings
-  const settings = { music: 7, sfx: 8, ost: 1, shake: 2, bright: 1, fx: 2, crt: 0 };
+  const settings = { music: 7, sfx: 8, ost: 1, shake: 2, bright: 1, fx: 2, crt: 0, lang: Math.max(0, I18N.LANGS.indexOf(I18N.lang)) };
   try {
     const saved = JSON.parse(localStorage.getItem('p88-settings'));
     if (saved) Object.assign(settings, saved);
     else if (TOUCH) settings.fx = 1; // phones start on LOW post FX; they can raise it in options
   } catch (e) { /* defaults */ }
+  if (I18N.fromUrl()) settings.lang = Math.max(0, I18N.LANGS.indexOf(I18N.detect())); // ?lang=ru wins over the saved choice
   const OPTS = [
     { key: 'music', label: 'MUSIC VOLUME', max: 10 },
     { key: 'sfx', label: 'SFX VOLUME', max: 10 },
@@ -2677,9 +2681,17 @@
     { key: 'bright', label: 'BRIGHTNESS', max: 2, names: ['DARK', 'NORMAL', 'BRIGHT'] },
     { key: 'fx', label: 'POST FX', max: 2, names: ['OFF', 'LOW', 'HIGH'] },
     { key: 'crt', label: 'SCANLINES', max: 1, names: ['OFF', 'ON'] },
+    { key: 'lang', label: 'LANGUAGE', max: I18N.LANGS.length - 1, names: ['ENGLISH', 'РУССКИЙ'] }, // names stay in their own language
   ];
   let optSel = 0, optionsOpen = false, optRects = [];
+  function applyLang() {
+    const l = I18N.LANGS[settings.lang] || 'en';
+    if (I18N.lang !== l) I18N.set(l);
+    UI = UI_FACES[l] || UI_FACES.en;
+    if (document.fonts && document.fonts.load) for (const wt of [500, 600, 700]) document.fonts.load(`${wt} 16px ${UI.split(',')[0]}`).catch(() => {});
+  }
   function applySettings(save = true) {
+    applyLang();
     if (A.setVolumes) A.setVolumes(settings.music / 7, settings.sfx / 8);
     if (A.setSoundtrack) A.setSoundtrack(settings.ost ? 'studio' : 'synth');
     if (save) try { localStorage.setItem('p88-settings', JSON.stringify(settings)); } catch (e) { /* ignore */ }
@@ -2723,6 +2735,7 @@
   }
   function entryKey(code, ch) {
     const L = LETTERS.length;
+    if (!(ch && /^[a-z0-9]$/i.test(ch))) { const m = /^(?:Key([A-Z])|Digit(\d))$/.exec(code || ''); if (m) ch = m[1] || m[2]; }
     if (ch && /^[a-z0-9]$/i.test(ch)) { entry.letters[entry.pos] = LETTERS.indexOf(ch.toUpperCase()); entry.pos = Math.min(2, entry.pos + 1); A.sfx('switch'); return; }
     if (code === 'ArrowUp') entry.letters[entry.pos] = (entry.letters[entry.pos] + 1) % L;
     else if (code === 'ArrowDown') entry.letters[entry.pos] = (entry.letters[entry.pos] + L - 1) % L;
@@ -2751,7 +2764,7 @@
     const bonus = Math.round(interTimer * 25 * wave);
     score += bonus;
     run.early++;
-    floatText(player.x, player.y - 30, `EARLY CALL +${bonus}`, '#ffd23a', 10);
+    floatText(player.x, player.y - 30, $t('EARLY CALL +{0}', bonus), '#ffd23a', 10);
     // calling with real breathing room left pays a power-up
     if (interTimer >= 2.5) {
       // out of magnet range, so the player picks when to take it (power-ups still expire)
@@ -2816,7 +2829,10 @@
     for (const r of optRects) {
       if (x < r.x || x > r.x + r.w || y < r.y || y > r.y + r.h) continue;
       optSel = r.i;
-      changeOpt(r.i, x < r.x + r.w / 2 ? -1 : 1);
+      // two-state rows flip on any click; the rest step down left of the value's centre (the < arrow sits
+      // right of the row's middle, so splitting the row in half made < step up and stall at the last value)
+      const o = OPTS[r.i];
+      changeOpt(r.i, o.max === 1 ? (settings[o.key] ? -1 : 1) : x < r.mid ? -1 : 1);
       return true;
     }
     return false;
@@ -3127,7 +3143,7 @@
   function bootLine(str, cls) {
     const el = document.createElement('div');
     if (cls) el.className = cls;
-    el.textContent = str || ' ';
+    el.textContent = $t(str) || ' ';
     bootLog.appendChild(el);
     return el;
   }
@@ -3139,7 +3155,7 @@
     bootLog.textContent = '';
     for (const [str, cls] of BOOT_LINES) bootLine(str, cls);
     document.getElementById('bootPrompt').classList.add('on');
-    document.getElementById('bootHint').textContent = TOUCH ? 'TAP TO ANSWER' : 'TYPE 88 OR CLICK';
+    document.getElementById('bootHint').textContent = $t(TOUCH ? 'TAP TO ANSWER' : 'TYPE 88 OR CLICK');
     bootLater(() => { document.getElementById('bootAnswer').classList.add('on'); if (!TOUCH) document.getElementById('boot88').focus({ preventScroll: true }); }, 220);
   }
   function bootType() {
@@ -3148,7 +3164,7 @@
     const step = () => {
       if (boot.ready) return;
       if (li >= BOOT_LINES.length) { bootPromptOn(); return; }
-      const [str, cls] = BOOT_LINES[li];
+      const [src, cls] = BOOT_LINES[li], str = $t(src);
       if (!el) el = bootLine('', cls);
       if (ci < str.length) { ci = Math.min(str.length, ci + 2); el.textContent = str.slice(0, ci); bootLater(step, 16); }
       else { li++; ci = 0; el = null; bootLater(step, str ? 110 : 40); }
@@ -3174,7 +3190,7 @@
     document.getElementById('bootAnswer').classList.remove('on');
     // the answered prompt becomes a log line, so the replies print under it
     document.getElementById('bootPrompt').style.display = 'none';
-    bootLine('> PROTOCOL NUMBER: 88', 'hot');
+    bootLine($t('> PROTOCOL NUMBER:') + ' 88', 'hot');
     powerUp();
     A.sfx('switch');
     const turn = TOUCH && innerHeight > innerWidth;
@@ -3273,7 +3289,7 @@
       updatePlayer(dt);
       comboTimer -= dt;
       if (comboTimer <= 0 && combo) {
-        if (combo >= 18) floatText(player.x, player.y - 40, `COMBO ENDED - ${combo}`, '#8a8ab0', 9);
+        if (combo >= 18) floatText(player.x, player.y - 40, $t('COMBO ENDED - {0}', combo), '#8a8ab0', 9);
         combo = 0; mult = 1; player.streakLvl = 0;
       }
     } else if (state === 'dying') {
@@ -4084,10 +4100,11 @@
           ctx.fillText(info.icon, 1, 1);
           if (!(pk.drop > 0)) {
             const lv = player.perk[pk.gk];
-            ctx.font = font(7); ctx.fillStyle = '#000'; ctx.fillText(info.name, 1, -33); ctx.fillStyle = info.color; ctx.fillText(info.name, 0, -34);
-            ctx.font = font(6); ctx.fillStyle = '#c8d0e8'; ctx.fillText(crateDesc(pk.gk), 0, 32);
-            ctx.fillStyle = info.color; ctx.fillText(lv ? `PERK LV ${lv + 1}` : 'NEW PERK', 0, 42);
-            if (synergy(player, pk.gk) || (info.needs && !lv)) { ctx.fillStyle = Math.sin(pk.t * 6) > -0.4 ? '#ffd23a' : '#fff6c8'; ctx.fillText('SYNERGY', 0, -44); }
+            const nm = $t(info.name);
+            ctx.font = font(7); ctx.fillStyle = '#000'; ctx.fillText(nm, 1, -33); ctx.fillStyle = info.color; ctx.fillText(nm, 0, -34);
+            ctx.font = font(6); ctx.fillStyle = '#c8d0e8'; ctx.fillText($t(crateDesc(pk.gk)), 0, 32);
+            ctx.fillStyle = info.color; ctx.fillText(lv ? $t('PERK LV {0}', lv + 1) : $t('NEW PERK'), 0, 42);
+            if (synergy(player, pk.gk) || (info.needs && !lv)) { ctx.fillStyle = Math.sin(pk.t * 6) > -0.4 ? '#ffd23a' : '#fff6c8'; ctx.fillText($t('SYNERGY'), 0, -44); }
           }
           break;
         }
@@ -4098,9 +4115,9 @@
         ctx.font = font(12); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = info.color;
         ctx.fillText(info.icon, 1, 1);
         if (!(pk.drop > 0)) {
-          const lvl = GEAR[pk.gk] ? `LV ${player.gear[pk.gk] + 1}` : '';
-          ctx.font = font(7); ctx.fillStyle = '#000'; ctx.fillText(info.name, 1, -27); ctx.fillStyle = info.color; ctx.fillText(info.name, 0, -28);
-          ctx.font = font(6); ctx.fillStyle = '#c8d0e8'; ctx.fillText(info.desc, 0, 26);
+          const lvl = GEAR[pk.gk] ? $t('LV {0}', player.gear[pk.gk] + 1) : '', nm = $t(info.name);
+          ctx.font = font(7); ctx.fillStyle = '#000'; ctx.fillText(nm, 1, -27); ctx.fillStyle = info.color; ctx.fillText(nm, 0, -28);
+          ctx.font = font(6); ctx.fillStyle = '#c8d0e8'; ctx.fillText($t(info.desc), 0, 26);
           if (lvl) { ctx.fillStyle = info.color; ctx.fillText(lvl, 0, 36); }
         }
         break;
@@ -4137,7 +4154,7 @@
         ctx.fillStyle = w.color; ctx.fillRect(-12, -3, 24, 6);
         ctx.rotate(-Math.sin(pk.t * 2) * 0.15);
         ctx.font = font(8); ctx.textAlign = 'center'; ctx.fillStyle = '#ffd23a';
-        ctx.fillText(w.short, 0, -22);
+        ctx.fillText($t(w.short), 0, -22);
         break;
       }
       case 'upgrade':
@@ -4567,7 +4584,7 @@
       glow(c, pd.x, pd.y, pd.r * 1.6, pd.st === 'active' ? 0.35 + pd.flash * 6 : pd.st === 'ready' ? 0.18 + beatPulse * 0.15 + pd.prog * 0.4 : 0.06);
       ctx.font = font(7); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillStyle = c;
       const near = player && Math.hypot(player.x - pd.x, player.y - pd.y) < 260;
-      const label = pd.st === 'active' ? `TURRET ${Math.ceil(pd.t)}S` : pd.st === 'cool' ? `RECHARGING ${Math.ceil(pd.t)}S` : near ? 'STAND HERE TO DEPLOY' : 'TURRET';
+      const label = pd.st === 'active' ? $t('TURRET {0}S', Math.ceil(pd.t)) : pd.st === 'cool' ? $t('RECHARGING {0}S', Math.ceil(pd.t)) : $t(near ? 'STAND HERE TO DEPLOY' : 'TURRET');
       ctx.globalAlpha = pd.st === 'ready' && !near ? 0.6 : 0.9; ctx.fillText(label, pd.x, pd.y - pd.r - 14); ctx.globalAlpha = 1;
     }
     for (const pl of pillars) if (pl.leak > 0 && vis(pl, pl.r * 3)) {
@@ -4659,7 +4676,7 @@
           ctx.beginPath(); ctx.arc(e.x, e.y, 240, 0, TAU); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
         }
         // name tag
-        const tag = (e.bounty ? 'BOUNTY · ' : '') + e.affix.map(k => AFFIX[k].name).join(' ');
+        const tag = (e.bounty ? $t('BOUNTY · ') : '') + e.affix.map(k => $t(AFFIX[k].name)).join(' ');
         ctx.font = font(7); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.fillStyle = e.bounty ? MODS.bounty.color : c; ctx.globalAlpha = 0.9;
         ctx.fillText(tag, e.x, e.y - e.r * 1.4 - 12); ctx.globalAlpha = 1;
@@ -4743,7 +4760,8 @@
     ctx.fillStyle = 'rgba(6,4,16,0.72)'; ctx.fillRect(x, y, w, h);
     if (border) { ctx.strokeStyle = border; ctx.lineWidth = 2; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
   }
-  function text(str, x, y, size, color, align = 'left', base = 'top', shadow = true) {
+  function text(str, x, y, size, color, align, base, shadow) { textR($t(str), x, y, size, color, align, base, shadow); }
+  function textR(str, x, y, size, color, align = 'left', base = 'top', shadow = true) {
     ctx.font = font(size); ctx.textAlign = align; ctx.textBaseline = base;
     if (shadow) { ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillText(str, x + 2, y + 2); }
     ctx.fillStyle = color; ctx.fillText(str, x, y);
@@ -4773,6 +4791,7 @@
   }
   // UI-font text with optional tracking (letter spacing) and a soft drop shadow
   function utext(str, x, y, size, color, align = 'left', base = 'top', wt = 600, track = 0, shadow = true) {
+    str = $t(str);
     ctx.font = ufont(size, wt); ctx.textAlign = align; ctx.textBaseline = base;
     if (track) ctx.letterSpacing = track + 'px';
     if (shadow) { ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillText(str, x + 1, y + 1); }
@@ -4847,7 +4866,7 @@
       for (const k of gearOwned) put(24, { kind: 'gear', k });
       perksOwned.forEach((k, i) => put(24, { kind: 'perk', k }, i === 0 && gearOwned.length ? 6 : 0));
       ctx.font = ufont(11, 700); ctx.letterSpacing = '1px';
-      powers.forEach((k, i) => put(Math.min(maxX, ctx.measureText(POWER[k].name).width + 18), { kind: 'power', k }, i === 0 && chips.length ? 6 : 0));
+      powers.forEach((k, i) => put(Math.min(maxX, ctx.measureText($t(POWER[k].name)).width + 18), { kind: 'power', k }, i === 0 && chips.length ? 6 : 0));
       ctx.letterSpacing = '0px';
     }
     const rows = chips.length ? chips[chips.length - 1].row + 1 : 0;
@@ -4868,9 +4887,12 @@
     hudBar(bx, hy + 31, bwid, 12, frac, hud.hpTrail, hc, 10);
     // dash
     const dr = clamp(1 - p.dashCd / (1.0 - 0.15 * p.gear.boots), 0, 1);
+    ctx.font = ufont(10, 700); ctx.letterSpacing = '2px';
+    const dlx = bx + Math.max(42, Math.ceil(ctx.measureText($t('DASH')).width) + 6); // the bar starts after the label, however long it is
+    ctx.letterSpacing = '0px';
     utext('DASH', bx, hy + 49, 10, dr >= 1 ? '#7ae0ff' : '#4a6a7a', 'left', 'top', 700, 2);
-    hudBar(bx + 42, hy + 52, 70, 4, dr, 0, dr >= 1 ? '#5ad1ff' : '#2a6a8a');
-    if (dr >= 1) utext('READY', bx + 120, hy + 49, 10, '#5ad1ff', 'left', 'top', 600, 1);
+    hudBar(dlx, hy + 52, 70, 4, dr, 0, dr >= 1 ? '#5ad1ff' : '#2a6a8a');
+    if (dr >= 1) utext('READY', dlx + 78, hy + 49, 10, '#5ad1ff', 'left', 'top', 600, 1);
     // gear chips, perk chips, timed power-ups
     for (const c of chips) {
       const gx = bx + c.x, gy = hy + 64 + c.row * 28;
@@ -4902,7 +4924,7 @@
 
     // ---- wave header
     const wsz = (small ? 15 : 21) + beatPulse * 2;
-    const wtxt = wave > 0 ? `WAVE ${wave}` : 'GET READY';
+    const wtxt = wave > 0 ? $t('WAVE {0}', wave) : $t('GET READY');
     ctx.font = font(wsz); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     ctx.fillStyle = 'rgba(18,0,42,0.9)'; ctx.fillText(wtxt, W / 2 + 3, 17);
     const wg = ctx.createLinearGradient(0, 14, 0, 14 + wsz);
@@ -4912,18 +4934,18 @@
     if (state === 'play') {
       if (waveActive) {
         const rem = spawnQueue.length + enemies.length;
-        if (hunt) utext(`LAST ${rem}  ·  HUNT THEM DOWN`, W / 2, sy0, 13, Math.sin(gameTime * 8) > 0 ? '#ffd23a' : '#ff8a3a', 'center', 'top', 700, 2);
-        else utext(`${rem} HOSTILES`, W / 2, sy0, 13, '#c9b8ff', 'center', 'top', 600, 3);
+        if (hunt) utext($t('LAST {0}  ·  HUNT THEM DOWN', rem), W / 2, sy0, 13, Math.sin(gameTime * 8) > 0 ? '#ffd23a' : '#ff8a3a', 'center', 'top', 700, 2);
+        else utext($t('{0} HOSTILES', rem), W / 2, sy0, 13, '#c9b8ff', 'center', 'top', 600, 3);
         if (waveMod) {
           const M = MODS[waveMod], bt = enemies.find(e => e.bounty && !e.dead);
-          const line = bt ? `BOUNTY  ·  ${Math.ceil(bt.bountyT)}S` : M.name;
+          const line = bt ? $t('BOUNTY  ·  {0}S', Math.ceil(bt.bountyT)) : M.name;
           const urgent = bt && bt.bountyT < 10 && Math.sin(gameTime * 10) > 0;
           utext(line, W / 2, sy0 + 17, 12, urgent ? '#ffffff' : M.color, 'center', 'top', 700, 3);
         }
       } else if (interTimer > 0) {
-        utext(`NEXT WAVE IN ${Math.ceil(interTimer)}`, W / 2, sy0, 13, '#7cff9a', 'center', 'top', 600, 3);
+        utext($t('NEXT WAVE IN {0}', Math.ceil(interTimer)), W / 2, sy0, 13, '#7cff9a', 'center', 'top', 600, 3);
         if (wave > 0) {
-          const lbl = `${touch.using ? 'TAP' : pad.connected && pad.using ? '[X]' : '[F]'}  BRING IT ON${interTimer >= 2.5 ? '  ·  EARN A POWER-UP' : ''}`;
+          const lbl = `${touch.using ? $t('TAP') : pad.connected && pad.using ? '[X]' : '[F]'}  ${$t('BRING IT ON')}${interTimer >= 2.5 ? $t('  ·  EARN A POWER-UP') : ''}`;
           if (touch.using && !relo) {
             // a real button on touch screens
             ctx.font = ufont(11, 700); ctx.letterSpacing = '2px';
@@ -4951,7 +4973,7 @@
     utext('SCORE', sx + 12, sy + 9, 11, '#7ae0ff', 'left', 'top', 700, 2);
     const sc = String(Math.round(hud.scoreShown)).padStart(8, '0');
     text(sc, sx + sw2 - 14, sy + 24, small ? 13 : 16, hud.scorePop > 0.5 ? '#fff6c8' : '#ffffff', 'right');
-    utext(`KILLS ${kills}`, sx + 12, sy + 44, 11, '#9a9ab8', 'left', 'top', 600, 1);
+    utext($t('KILLS {0}', kills), sx + 12, sy + 44, 11, '#9a9ab8', 'left', 'top', 600, 1);
     if (mult > 1) {
       const mc = mult >= 6 ? '#ff3af0' : mult >= 3 ? '#ffd23a' : '#7cff9a';
       const ms = 12 * (1 + hud.multPop * 0.6 + beatPulse * 0.12);
@@ -4959,7 +4981,7 @@
       ctx.translate(sx + sw2 - 14, sy + 49);
       text(`x${mult}`, 0, 0, ms, mc, 'right', 'middle');
       ctx.restore();
-      utext(`+${Math.round(comboBonus() * 100)}% DMG`, sx + sw2 - 62, sy + 44, 11, mc, 'right', 'top', 700, 1);
+      utext($t('+{0}% DMG', Math.round(comboBonus() * 100)), sx + sw2 - 62, sy + 44, 11, mc, 'right', 'top', 700, 1);
       const cf = clamp(comboTimer / 1.8, 0, 1);
       ctx.fillStyle = hexA(mc, 0.85); ctx.fillRect(sx + 1, sy + sh - 3, (sw2 - 11) * cf, 2);
     }
@@ -5060,7 +5082,7 @@
       const BT = ET[queens[0].type];
       const enr = queens.some(q => q.hp < q.maxHp * 0.5);
       hudPanel(qx - 10, qy - 4, qw + 20, 34, BT.color, 8);
-      utext(BT.name + (enr ? '  ·  ENRAGED' : ''), W / 2, qy + 2, 12, enr && Math.sin(gameTime * 8) > 0 ? '#ffffff' : BT.color, 'center', 'top', 700, 3);
+      utext($t(BT.name) + (enr ? $t('  ·  ENRAGED') : ''), W / 2, qy + 2, 12, enr && Math.sin(gameTime * 8) > 0 ? '#ffffff' : BT.color, 'center', 'top', 700, 3);
       hudBar(qx, qy + 18, qw, 7, bf, hud.bossTrail, BT.color, 4);
     } else hud.bossTrail = 1;
 
@@ -5106,7 +5128,7 @@
     const dur = 4.2;
     if (np.t > dur) return;
     const slide = np.t < 0.35 ? 1 - Math.pow(1 - np.t / 0.35, 3) : np.t > dur - 0.5 ? (dur - np.t) / 0.5 : 1;
-    const label = np.mode === 'boss' ? 'BOSS THEME' : np.mode === 'break' ? 'INTERMISSION' : np.key ? `NOW PLAYING  +${np.key} KEY` : 'NOW PLAYING';
+    const label = np.mode === 'boss' ? 'BOSS THEME' : np.mode === 'break' ? 'INTERMISSION' : np.key ? $t('NOW PLAYING  +{0} KEY', np.key) : 'NOW PLAYING';
     ctx.font = font(10);
     const w = Math.max(ctx.measureText(np.name).width, 110) + 96, h = 40;
     const px = x - (1 - slide) * (w + x + 10);
@@ -5121,7 +5143,7 @@
       ctx.beginPath(); ctx.moveTo(rx + Math.cos(a) * 7, y + 20 + Math.sin(a) * 7); ctx.lineTo(rx - Math.cos(a) * 7, y + 20 - Math.sin(a) * 7); ctx.stroke();
     }
     utext(label, px + 50, y + 5, 10, np.mode === 'boss' ? '#ff3af0' : '#5ad1ff', 'left', 'top', 700, 2, false);
-    text(np.name, px + 50, y + 19, 10, '#ffffff', 'left', 'top');
+    textR(np.name, px + 50, y + 19, 10, '#ffffff', 'left', 'top');
     // equaliser bars
     for (let i = 0; i < 5; i++) {
       const bh = 3 + Math.abs(Math.sin(i * 1.7 + (gameTime + menuT) * 9)) * 8 * (0.4 + beatPulse * 0.6);
@@ -5159,7 +5181,8 @@
     ctx.translate(W / 2 + slide, y);
     ctx.font = font(ts); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.letterSpacing = ((1 - ein) * 14).toFixed(1) + 'px';
-    const tw = ctx.measureText(b.title).width;
+    let tw = ctx.measureText(b.title).width;
+    if (tw > W * 0.94) { ctx.font = font(ts * W * 0.94 / tw); tw = ctx.measureText(b.title).width; }
     ctx.lineWidth = 6; ctx.strokeStyle = '#000'; ctx.strokeText(b.title, 0, 0);
     const gp = clamp((t - 0.25) / 0.6, 0, 1) * 1.4 - 0.2; // glint position across the word
     const tg = ctx.createLinearGradient(-tw / 2, 0, tw / 2, 0);
@@ -5168,7 +5191,12 @@
     tg.addColorStop(1, b.color);
     ctx.fillStyle = tg; ctx.fillText(b.title, 0, 0);
     ctx.letterSpacing = '0px';
-    if (b.sub) { ctx.font = font(Math.min(13, W / 60)); ctx.fillStyle = '#ffffff'; ctx.fillText(b.sub, -slide * 0.5, ts * 1.05); }
+    if (b.sub) {
+      ctx.font = font(Math.min(13, W / 60));
+      const sw = ctx.measureText(b.sub).width;
+      if (sw > W * 0.94) ctx.font = font(Math.min(13, W / 60) * W * 0.94 / sw);
+      ctx.fillStyle = '#ffffff'; ctx.fillText(b.sub, -slide * 0.5, ts * 1.05);
+    }
     if (b.sub2) { ctx.font = ufont(Math.min(14, W / 55), 600); ctx.letterSpacing = '2px'; ctx.fillStyle = '#c8c0e8'; ctx.fillText(b.sub2, -slide * 0.3, ts * 1.05 + 24); ctx.letterSpacing = '0px'; }
     ctx.restore();
   }
@@ -5197,6 +5225,7 @@
 
   // ======================================================================= render: screens
   function chromeTitle(str, x, y, size) {
+    str = $t(str);
     ctx.font = font(size); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const g = ctx.createLinearGradient(0, y - size / 2, 0, y + size / 2);
     g.addColorStop(0, '#f4fbff'); g.addColorStop(0.46, '#6fd8ff'); g.addColorStop(0.52, '#1a2a6a'); g.addColorStop(1, '#ff5ad8');
@@ -5272,7 +5301,7 @@
     }
     drawNowPlaying(rdt, 16, H - 60);
     // options button
-    const ol = touch.using ? 'OPTIONS' : pad.connected && pad.using ? '[Y] OPTIONS' : '[O] OPTIONS';
+    const ol = $t(touch.using ? 'OPTIONS' : pad.connected && pad.using ? '[Y] OPTIONS' : '[O] OPTIONS');
     ctx.font = font(9);
     const ow = ctx.measureText(ol).width + 24;
     const obh = touch.using ? 40 : 28, oy = H - obh - 16 - safe.b / UIS;
@@ -5304,12 +5333,12 @@
     const w = Math.min(480, W - 40), h = 96, x = W / 2 - w / 2, y = H * 0.33;
     ctx.fillStyle = 'rgba(6,2,16,0.72)'; ctx.fillRect(x, y, w, h);
     hudPanel(x, y, w, h, open ? k.color : '#5a5a7a');
-    utext(`STARTING KIT  ·  ${profile.kit + 1} / ${KITS.length}  ·  ${profile.unlocked.length} UNLOCKED`, W / 2, y + 10, 11, '#8a8ab0', 'center', 'top', 700, 2);
+    utext($t('STARTING KIT  ·  {0} / {1}  ·  {2} UNLOCKED', profile.kit + 1, KITS.length, profile.unlocked.length), W / 2, y + 10, 11, '#8a8ab0', 'center', 'top', 700, 2);
     text(k.name, W / 2, y + 30, Math.min(14, w / 24), open ? k.color : '#6a6a88', 'center');
     if (open) utext(k.desc, W / 2, y + 56, 13, '#d8d0ff', 'center', 'top', 600, 1);
     else {
       const [have, need] = k.goal(profile), f = clamp(have / need, 0, 1);
-      utext(`LOCKED  ·  ${k.req}`, W / 2, y + 52, 12, '#ff8a9a', 'center', 'top', 700, 1);
+      utext($t('LOCKED  ·  {0}', $t(k.req)), W / 2, y + 52, 12, '#ff8a9a', 'center', 'top', 700, 1);
       hudBar(x + 70, y + 74, w - 190, 5, f, 0, k.color);
       utext(`${Math.min(have, need)} / ${need}`, x + w - 110, y + 69, 11, '#d8d0ff', 'left', 'top', 600, 0);
     }
@@ -5327,9 +5356,9 @@
       const on = i === hl;
       const col = on ? (Math.sin(menuT * 10 + overT * 10) > 0 ? '#5affc8' : '#ffffff') : i === 0 ? '#ff7ad8' : '#d8d0ff';
       text(`${String(i + 1).padStart(2, ' ')}.`, cx - size * 13, yy, size, col, 'left', 'top');
-      text(r.name, cx - size * 8, yy, size, col, 'left', 'top');
+      textR(r.name, cx - size * 8, yy, size, col, 'left', 'top');
       text(String(r.score).padStart(8, '0'), cx - size * 2.5, yy, size, col, 'left', 'top');
-      text(`W${r.wave}`, cx + size * 9, yy, size, col, 'left', 'top');
+      text($t('W{0}', r.wave), cx + size * 9, yy, size, col, 'left', 'top');
     });
   }
 
@@ -5340,7 +5369,7 @@
     OPTS.forEach((o, i) => {
       const y = y0 + i * (rh + gap), sel = i === optSel;
       panel(x, y, w, rh, sel ? '#5affc8' : 'rgba(255,255,255,0.15)');
-      optRects.push({ x, y, w, h: rh, i });
+      optRects.push({ x, y, w, h: rh, i, mid: x + w - 130 }); // mid: the value's centre, between the < and > arrows
       utext(o.label, x + 18, y + cy, 15, sel ? '#5affc8' : '#d8d0ff', 'left', 'middle', 700, 2, false);
       const v = settings[o.key];
       const vx = x + w - 230;
@@ -5361,7 +5390,7 @@
     const colW = W / 2 - Math.min(560, W - 40) / 2 - 48;
     if (colW < 230) return;
     const items = [
-      ...PERK_KEYS.filter(k => p.perk[k] > 0).map(k => ({ info: PERKS[k], lv: p.perk[k], desc: PERKS[k].desc.slice(0, p.perk[k]).join(' · ') })),
+      ...PERK_KEYS.filter(k => p.perk[k] > 0).map(k => ({ info: PERKS[k], lv: p.perk[k], desc: PERKS[k].desc.slice(0, p.perk[k]).map(d => $t(d)).join(' · ') })),
       ...GEAR_KEYS.filter(k => p.gear[k] > 0).map(k => ({ info: GEAR[k], lv: p.gear[k], desc: GEAR[k].desc })),
     ];
     const x = 24 + Math.max(0, colW - 330);
@@ -5373,7 +5402,7 @@
       ctx.fillStyle = hexA(c, 0.12); ctx.fillRect(x, y, 22, 22);
       ctx.strokeStyle = hexA(c, 0.8); ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, 21, 21);
       text(it.info.icon, x + 11, y + 6, 9, c, 'center', 'top', false);
-      utext(`${it.info.name}${it.info.max > 1 ? `  LV ${it.lv}` : ''}`, x + 30, y + 1, 12, c, 'left', 'top', 700, 1, false);
+      utext(`${$t(it.info.name)}${it.info.max > 1 ? $t('  LV {0}', it.lv) : ''}`, x + 30, y + 1, 12, c, 'left', 'top', 700, 1, false);
       if (rh >= 34) utext(it.desc, x + 30, y + 16, 10, '#b8b0d8', 'left', 'top', 600, 0, false);
     });
   }
@@ -5424,7 +5453,7 @@
     'VENT FLARE': 'VENT FLARES LAND WHERE YOU ARE HEADING - CHANGE DIRECTION',
     'CORE FLARE': 'DASH THROUGH THE CORE FLARE - DASH I-FRAMES IGNORE IT',
   };
-  const killerName = k => (k && ET[k] ? ET[k].name : k || 'UNKNOWN');
+  const killerName = k => (k && ET[k] ? $t(ET[k].name) : k && k.startsWith('VOLATILE ') ? $t('VOLATILE {0}', $t(k.slice(9))) : $t(k || 'UNKNOWN'));
   const killerTip = k => TIPS[k] || (k && k.startsWith('VOLATILE') ? 'VOLATILE ELITES BLOW UP AFTER DEATH - LEAVE THE RING' : '');
   const fmtTime = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
@@ -5446,11 +5475,11 @@
     hudPanel(x, y, w, h, '#ff4f6d');
     let cy = y + 12;
     utext('RUN REPORT', x + 14, cy, 13, '#ff8ab0', 'left', 'top', 700, 3);
-    if (run.mods || run.bounties) utext(`${run.mods} TWIST${run.mods === 1 ? '' : 'S'} SURVIVED${run.bounties ? `  ·  ${run.bounties} BOUNTY` : ''}`, x + w - 14, cy + 1, 11, '#ffd23a', 'right', 'top', 700, 1);
+    if (run.mods || run.bounties) utext($t(run.mods === 1 ? '{0} TWIST SURVIVED' : '{0} TWISTS SURVIVED', run.mods) + (run.bounties ? $t('  ·  {0} BOUNTY', run.bounties) : ''), x + w - 14, cy + 1, 11, '#ffd23a', 'right', 'top', 700, 1);
     cy += 26;
     if (run.unlocks.length) {
       ctx.fillStyle = 'rgba(255,210,58,0.1)'; ctx.fillRect(x + 14, cy, w - 28, 24);
-      utext(`KIT UNLOCKED: ${run.unlocks.join(', ')}`, x + 24, cy + 5, 12, Math.sin(overT * 6) > -0.4 ? '#ffd23a' : '#fff6c8', 'left', 'top', 700, 1, false);
+      utext($t('KIT UNLOCKED: {0}', run.unlocks.map(n => $t(n)).join(', ')), x + 24, cy + 5, 12, Math.sin(overT * 6) > -0.4 ? '#ffd23a' : '#fff6c8', 'left', 'top', 700, 1, false);
       cy += 30;
     }
     const tw = (w - 28) / 4;
@@ -5504,9 +5533,10 @@
     if (overT < 0.2) return;
     const ts = Math.min(56, W / 12);
     ctx.font = font(ts); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.lineWidth = 8; ctx.strokeStyle = '#000'; ctx.strokeText('YOU DIED', W / 2, H * 0.12);
-    ctx.fillStyle = '#ff2a3a'; ctx.fillText('YOU DIED', W / 2, H * 0.12);
-    text(`WAVE ${wave}   SCORE ${String(score).padStart(8, '0')}   KILLS ${kills}`, W / 2, H * 0.12 + ts * 0.8, Math.min(11, W / 70), '#ffd23a', 'center');
+    const died = $t('YOU DIED');
+    ctx.lineWidth = 8; ctx.strokeStyle = '#000'; ctx.strokeText(died, W / 2, H * 0.12);
+    ctx.fillStyle = '#ff2a3a'; ctx.fillText(died, W / 2, H * 0.12);
+    text($t('WAVE {0}   SCORE {1}   KILLS {2}', wave, String(score).padStart(8, '0'), kills), W / 2, H * 0.12 + ts * 0.8, Math.min(11, W / 70), '#ffd23a', 'center');
     if (entry && !entry.done) {
       text('NEW HIGH SCORE!', W / 2, H * 0.36, Math.min(22, W / 30), Math.sin(overT * 8) > 0 ? '#5affc8' : '#ffffff', 'center');
       text('ENTER YOUR INITIALS', W / 2, H * 0.36 + 36, 10, '#d8d0ff', 'center');
@@ -5546,7 +5576,7 @@
     }
     // kit for the next run, switchable right here
     const k = KITS[profile.kit] || KITS[0], open = kitOpen(k), ky = H * 0.88 - 30;
-    const kl = `NEXT KIT:  ${k.name}${open ? '' : '  (LOCKED)'}`;
+    const kl = $t('NEXT KIT:  {0}', $t(k.name)) + (open ? '' : $t('  (LOCKED)'));
     ctx.font = ufont(13, 700);
     const kw = ctx.measureText(kl).width + 90;
     utext(kl, W / 2, ky, 13, open ? k.color : '#ff5a6a', 'center', 'top', 700, 2);

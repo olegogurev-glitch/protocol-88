@@ -31,10 +31,16 @@ Options → Soundtrack switches between STUDIO and SYNTH.
 Lifetime challenges unlock starting kits (a weapon plus gear or a perk). Pick one on the main menu or on the game-over screen with A / D, the arrow keys, the d-pad or the bumpers.
 Progress lives in `localStorage` under `p88-profile`. Bot runs (`?bot`) never read or write it.
 
+## Languages
+
+English and Russian. The game picks Russian when the browser's preferred language is Russian; Options → LANGUAGE switches at any time (saved with the other settings), and `?lang=ru` / `?lang=en` in the URL overrides both.
+All text lives in English in the code and goes through `I18N.t()` when drawn; `js/i18n.js` holds the Russian table (templates use `{0}`, `{1}` slots). Russian swaps the UI face to Tektur, since Chakra Petch has no Cyrillic.
+
 ## Project layout
 
 - `index.html` — page shell. Bump the `?v=` on the script tags after changing code so browsers don't serve stale copies.
 - `js/game.js` — gameplay, rendering, HUD, input.
+- `js/i18n.js` — translations (Russian) and language detection.
 - `js/audio.js` — the studio soundtrack player, the procedural synth score (8 songs) and all sound effects.
 - `music/` — the studio soundtrack (MP3). Track names, roles and tempos are in the `OST` table in `js/audio.js`; sources in `music/CREDITS.md`.
   The tracks are licensed stock music (Envato Elements) for use in this game only; they are not licensed for reuse elsewhere.

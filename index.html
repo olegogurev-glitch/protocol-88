@@ -12,7 +12,7 @@
 <title>Protocol 88</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Press+Start+2P&family=Tektur:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   body { position: fixed; inset: 0; overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
@@ -95,20 +95,21 @@
 <body>
 <canvas id="game"></canvas>
 <div id="safe"></div>
-<div id="boot" role="dialog" aria-label="Protocol 88 boot console">
+<div id="boot" role="dialog" aria-label="Protocol 88 boot console" data-i18n-label="Protocol 88 boot console">
   <div class="bootScreen" id="bootScreen">
     <div class="term">
       <pre id="bootLog"></pre>
-      <div class="prompt" id="bootPrompt">&gt; PROTOCOL NUMBER: <span id="bootInput"></span><span class="caret" id="bootCaret">_</span></div>
+      <div class="prompt" id="bootPrompt"><span data-i18n="&gt; PROTOCOL NUMBER:">&gt; PROTOCOL NUMBER:</span> <span id="bootInput"></span><span class="caret" id="bootCaret">_</span></div>
       <div class="answer" id="bootAnswer">
-        <button id="boot88" type="button" aria-label="Answer 88">88</button>
+        <button id="boot88" type="button" aria-label="Answer 88" data-i18n-label="Answer 88">88</button>
         <div class="answerHint" id="bootHint"></div>
       </div>
     </div>
   </div>
 </div>
-<div id="rotate" aria-live="polite"><div class="phone"></div><div>ROTATE DEVICE</div><small>PROTOCOL 88 RUNS IN LANDSCAPE</small></div>
+<div id="rotate" aria-live="polite"><div class="phone"></div><div data-i18n="ROTATE DEVICE">ROTATE DEVICE</div><small data-i18n="PROTOCOL 88 RUNS IN LANDSCAPE">PROTOCOL 88 RUNS IN LANDSCAPE</small></div>
 <script src="js/audio.js?v=16"></script>
-<script src="js/game.js?v=29"></script>
+<script src="js/i18n.js?v=1"></script>
+<script src="js/game.js?v=31"></script>
 </body>
 </html>
