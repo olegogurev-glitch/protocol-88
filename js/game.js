@@ -331,12 +331,12 @@
   resize();
 
   // ======================================================================= storage
+  const NO_SAVE = /[?&]bot\b/.test(location.search); // bot runs never read or write the player's saves
   let best = { wave: 0, score: 0 };
-  try { best = JSON.parse(localStorage.getItem('p88-best')) || best; } catch (e) { /* private mode */ }
-  function saveBest() { try { localStorage.setItem('p88-best', JSON.stringify(best)); } catch (e) { /* ignore */ } }
+  try { if (!NO_SAVE) best = JSON.parse(localStorage.getItem('p88-best')) || best; } catch (e) { /* private mode */ }
+  function saveBest() { if (NO_SAVE) return; try { localStorage.setItem('p88-best', JSON.stringify(best)); } catch (e) { /* ignore */ } }
 
   // ---- meta progression: lifetime counters unlock starting kits
-  const NO_SAVE = /[?&]bot\b/.test(location.search); // bot runs never touch the player's profile
   const PROFILE0 = { runs: 0, kills: 0, bestWave: 0, bosses: {}, burnKills: 0, bounties: 0, mods: 0, unlocked: ['standard'], kit: 0 };
   let profile = { ...PROFILE0, bosses: {} };
   try { if (!NO_SAVE) profile = { ...profile, ...JSON.parse(localStorage.getItem('p88-profile') || '{}') }; } catch (e) { /* private mode */ }
@@ -2694,7 +2694,7 @@
     applyLang();
     if (A.setVolumes) A.setVolumes(settings.music / 7, settings.sfx / 8);
     if (A.setSoundtrack) A.setSoundtrack(settings.ost ? 'studio' : 'synth');
-    if (save) try { localStorage.setItem('p88-settings', JSON.stringify(settings)); } catch (e) { /* ignore */ }
+    if (save && !NO_SAVE) try { localStorage.setItem('p88-settings', JSON.stringify(settings)); } catch (e) { /* ignore */ }
   }
   applySettings(false);
   function changeOpt(i, d) {
@@ -2730,7 +2730,7 @@
     highlight = scores.indexOf(rec);
     entry.done = true;
     overT = 0.6;
-    try { localStorage.setItem('p88-scores', JSON.stringify(scores)); localStorage.setItem('p88-initials', name); } catch (e) { /* ignore */ }
+    if (!NO_SAVE) try { localStorage.setItem('p88-scores', JSON.stringify(scores)); localStorage.setItem('p88-initials', name); } catch (e) { /* ignore */ }
     A.sfx('gear');
   }
   function entryKey(code, ch) {

@@ -29,7 +29,7 @@ Options → Soundtrack switches between STUDIO and SYNTH.
 ## Starting kits
 
 Lifetime challenges unlock starting kits (a weapon plus gear or a perk). Pick one on the main menu or on the game-over screen with A / D, the arrow keys, the d-pad or the bumpers.
-Progress lives in `localStorage` under `p88-profile`. Bot runs (`?bot`) never read or write it.
+Progress lives in `localStorage` under `p88-profile`. Bot runs (`?bot`) never read or write any saved data (profile, best score, high scores, settings), so the bot can run as a live preview next to a real save.
 
 ## Languages
 
