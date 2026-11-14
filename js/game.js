@@ -1084,7 +1084,7 @@
     p.fireCd = Math.max(p.fireCd, 0.12);
     p.spin = 0;
     p.swapT = 0.28;
-    if (!silent) A.sfx('switch');
+    if (!silent) { A.sfx('switch'); rumble(0, 0.25, 30); }
     return true;
   }
   function cycleWeapon(dir) {
@@ -1110,6 +1110,7 @@
     p.dashIF = 0.3; p.dodged = false; // the dash's own i-frames: an attack landing in them is a perfect dodge
     p.invuln = Math.max(p.invuln, 0.3);
     A.sfx('dash');
+    rumble(0.15, 0.3, 90);
     part({ kind: 'ring', x: p.x, y: p.y, vx: 0, vy: 0, life: 0.3, size: 30, color: '#5ad1ff', glow: true });
   }
 
@@ -1265,6 +1266,8 @@
     }
     shake = Math.min(shake + w.shake, 30);
     A.sfx(w.id);
+    const rb = SHOT_RUMBLE[w.id];
+    if (rb) rumble(rb[0], rb[1], rb[2], { fade: w.id !== 'flamer' });
     if (w.kind === 'bullet' && w.id !== 'shotgun' && Math.random() < (w.rate > 12 ? 0.5 : 1)) {
       part({ kind: 'shell', x: p.x + ca * 8 - sa * 5, y: p.y + sa * 8 + ca * 5,
         vx: -sa * rand(90, 160) + rand(-30, 30), vy: ca * rand(90, 160) + rand(-30, 30),
@@ -1577,7 +1580,7 @@
     p.shield -= ab;
     p.shieldHit = 0.25;
     if (p.shield <= 0) {
-      A.sfx('shieldbreak');
+      A.sfx('shieldbreak'); rumble(0.5, 0.65, 220);
       for (let i = 0; i < 14; i++) { const a = rand(0, TAU); part({ kind: 'spark', x: p.x + Math.cos(a) * 26, y: p.y + Math.sin(a) * 26, vx: Math.cos(a) * 200, vy: Math.sin(a) * 200, life: 0.35, size: 2, color: '#5ad1ff', drag: 3, glow: true }); }
     }
     return dmg - ab;
@@ -1629,7 +1632,7 @@
     if (p.invuln > 0) { if (p.dashIF > 0 && !p.dodged) perfectDodge(); return; }
     if (p.aegis > 0) { sparks(p.x, p.y, '#ffd23a', 6, 220); p.invuln = 0.15; return; }
     dmg = hitShield(dmg * (1 - 0.12 * p.gear.armor));
-    if (dmg <= 0) { A.sfx('shield'); p.invuln = 0.2; return; }
+    if (dmg <= 0) { A.sfx('shield'); rumble(0, 0.35, 70); p.invuln = 0.2; return; }
     p.hp -= dmg;
     run.taken += dmg;
     if (p.hp <= 0) run.killedBy = byName(src);
@@ -1644,6 +1647,7 @@
     }
     blood(p.x, p.y, '#d01a2a', 10, 220);
     A.sfx('hurt');
+    rumble(Math.min(1, 0.5 + dmg / 30), 0.4, 170 + Math.min(200, dmg * 5));
     if (p.hp <= 0) { p.hp = 0; playerDie(); }
   }
 
@@ -1659,6 +1663,7 @@
     ripple(p.x, p.y, 320, 0.02, 0.4);
     aberr = Math.max(aberr, 0.3);
     A.sfx('dodge');
+    rumble(0, 0.7, 45); rumble(0, 0.5, 45, { delay: 90 });
   }
 
   function playerDie() {
@@ -1676,6 +1681,7 @@
     splat(p.x, p.y, 40, '#7a0a14', 12);
     music('off');
     A.sfx('death');
+    rumble(1, 0.8, 1500);
     run.time = gameTime;
     profile.runs++; profile.kills += kills;
     saveProfile();
@@ -1775,6 +1781,7 @@
     if (isBoss(e)) {
       banner('WARNING', $t('{0} DETECTED', $t(ET[e.type].name)), ET[e.type].color, 2.2, '', true);
       A.sfx('roar'); shake = 20; aberr = Math.max(aberr, 0.6);
+      rumble(0.9, 0.2, 1000); rumble(0.5, 0, 500, { delay: 1000 });
       punchZoom(0.12); A.duck(0.25, 0.6, 1); ripple(e.x, e.y, 520, 0.035, 0.7);
     }
     enemies.push(e);
@@ -1904,7 +1911,7 @@
       if (e.stT <= 0) {
         e.st = null; e.fly = false; e.cd = enr ? 1.2 : 2;
         shocks.push({ x: e.x, y: e.y, r: e.r, spd: 520, max: 210, dmg: e.dmg * 0.6, hit: false, color: '#7aff5a', by: e.type });
-        shake = Math.min(30, shake + 14); A.sfx('thud');
+        shake = Math.min(30, shake + 14); A.sfx('thud'); rumbleAt(e.x, e.y, 0.9, 0.3, 380);
       }
       return;
     }
@@ -1967,7 +1974,7 @@
       if (e.stT <= 0) {
         e.st = null; e.cd = enr ? 1.3 : 2;
         for (let i = 0; i < (enr ? 3 : 2); i++) shocks.push({ x: e.x, y: e.y, r: e.r - i * 120, spd: 380, max: 650, dmg: e.dmg * 0.45, hit: false, color: '#ff7a1a', by: e.type });
-        shake = Math.min(30, shake + 18); aberr = Math.max(aberr, 0.5); A.sfx('explode');
+        shake = Math.min(30, shake + 18); aberr = Math.max(aberr, 0.5); A.sfx('explode'); rumbleAt(e.x, e.y, 1, 0.4, 600, 1200);
         ripple(e.x, e.y, 600, 0.035, 0.6);
       }
       return;
@@ -2295,6 +2302,8 @@
     if (e.type !== 'egg' && e.type !== 'boomer') stampCorpse(e);
     part({ kind: 'flash', x: e.x, y: e.y, vx: 0, vy: 0, life: 0.08, size: e.r * 2.2, color: T.blood, glow: true });
     A.sfx('die');
+    if (T.boss) rumble(1, 1, 1100);
+    else if (state === 'play') rumble(Math.min(0.4, e.r / 60), 0.18, 35);
     shake = Math.min(30, shake + e.r / 14);
 
     if (e.type === 'boomer') explode(e.x, e.y, 115, e.dmg, 'boomer');
@@ -2353,6 +2362,7 @@
     sparks(x, y, '#ffcf5a', lite ? 8 : 18, 520);
     scorch(x, y, R * 0.65);
     A.sfx('explode');
+    rumbleAt(x, y, lite ? 0.5 : 0.95, lite ? 0.25 : 0.5, lite ? 250 : 450);
     if (src === 'fx') return;
     for (const e of enemies) {
       if (e.dead) continue;
@@ -2444,6 +2454,7 @@
         selectWeapon(pk.wi, true);
         banner('NEW WEAPON', w.name, w.color, 2.2, $t('EQUIPPED - SLOT {0}', (pk.wi + 1) % 10), true);
         A.sfx('weapon');
+        rumble(0.3, 0.5, 80); rumble(0.3, 0.5, 80, { delay: 140 });
         shake = Math.min(30, shake + 6);
         break;
       }
@@ -2558,6 +2569,7 @@
     if (player) ripple(player.x, player.y, 700, 0.02, 0.8);
     music('break', 1, 140);
     A.sfx('clear');
+    rumble(0.2, 0.3, 650);
     const p = player;
     spawnPickup('ammo', p.x + rand(-160, 160), p.y + rand(-160, 160));
     if (p.hp < 70) spawnPickup('med', p.x + rand(-160, 160), p.y + rand(-160, 160));
@@ -2666,7 +2678,7 @@
   }
 
   // ======================================================================= settings
-  const settings = { music: 7, sfx: 8, ost: 1, shake: 2, bright: 1, fx: 2, crt: 0, lang: Math.max(0, I18N.LANGS.indexOf(I18N.lang)) };
+  const settings = { music: 7, sfx: 8, ost: 1, shake: 2, bright: 1, fx: 2, crt: 0, rumble: 2, triggers: 0, lang: Math.max(0, I18N.LANGS.indexOf(I18N.lang)) };
   try {
     const saved = JSON.parse(localStorage.getItem('p88-settings'));
     if (saved) Object.assign(settings, saved);
@@ -2681,6 +2693,9 @@
     { key: 'bright', label: 'BRIGHTNESS', max: 2, names: ['DARK', 'NORMAL', 'BRIGHT'] },
     { key: 'fx', label: 'POST FX', max: 2, names: ['OFF', 'LOW', 'HIGH'] },
     { key: 'crt', label: 'SCANLINES', max: 1, names: ['OFF', 'ON'] },
+    ...(TOUCH ? [] : [{ key: 'rumble', label: 'RUMBLE', max: 2, names: ['OFF', 'LOW', 'FULL'] }]),
+    // DualSense adaptive triggers need WebHID (Chrome / Edge on a computer)
+    ...(TOUCH || !HAPTICS.hid ? [] : [{ key: 'triggers', label: 'DUALSENSE TRIGGERS', max: 1, names: ['OFF', 'ON'] }]),
     { key: 'lang', label: 'LANGUAGE', max: I18N.LANGS.length - 1, names: ['ENGLISH', 'РУССКИЙ'] }, // names stay in their own language
   ];
   let optSel = 0, optionsOpen = false, optRects = [];
@@ -2694,14 +2709,24 @@
     applyLang();
     if (A.setVolumes) A.setVolumes(settings.music / 7, settings.sfx / 8);
     if (A.setSoundtrack) A.setSoundtrack(settings.ost ? 'studio' : 'synth');
+    HAPTICS.setGain(NO_SAVE ? 0 : [0, 0.6, 1][settings.rumble] || 0);
     if (save && !NO_SAVE) try { localStorage.setItem('p88-settings', JSON.stringify(settings)); } catch (e) { /* ignore */ }
   }
   applySettings(false);
+  // a controller paired on an earlier visit reconnects without asking
+  if (settings.triggers && !NO_SAVE) HAPTICS.enableTriggers(true, false);
+  let pairNote = 0; // seconds left on the "pair with mouse / keyboard" hint
   function changeOpt(i, d) {
     const o = OPTS[i];
     settings[o.key] = clamp(settings[o.key] + d, 0, o.max);
     applySettings();
     A.sfx('switch');
+    if (o.key === 'rumble' && settings.rumble) HAPTICS.rumble(0.5, 0.5, 220);
+    if (o.key === 'triggers') {
+      // the device chooser only opens from a click or key press, never from a gamepad button
+      const ask = !!(navigator.userActivation ? navigator.userActivation.isActive : true);
+      HAPTICS.enableTriggers(!!settings.triggers, ask).then(ok => { if (settings.triggers && !ok) pairNote = 4; if (ok) pairNote = 0; });
+    }
   }
   const shakeMul = () => [0, 0.4, 1][settings.shake];
 
@@ -2832,7 +2857,8 @@
       // two-state rows flip on any click; the rest step down left of the value's centre (the < arrow sits
       // right of the row's middle, so splitting the row in half made < step up and stall at the last value)
       const o = OPTS[r.i];
-      changeOpt(r.i, o.max === 1 ? (settings[o.key] ? -1 : 1) : x < r.mid ? -1 : 1);
+      const pairing = o.key === 'triggers' && settings.triggers && !HAPTICS.paired; // ON but not paired yet: a click pairs
+      changeOpt(r.i, pairing ? 1 : o.max === 1 ? (settings[o.key] ? -1 : 1) : x < r.mid ? -1 : 1);
       return true;
     }
     return false;
@@ -2885,15 +2911,15 @@
   });
 
   // ---------------------------------------------------------------- gamepad (twin-stick)
-  // left stick move, right stick aim + fire, RT/RB fire, LT/A dash, LB/B previous weapon,
-  // Y / d-pad left-right cycle weapons, X early call, Start pause, Back next track
-  const pad = { connected: false, using: false, move: [0, 0], aim: null, aimActive: false, fire: false, prev: [] };
+  // left stick move, right stick aim + fire, RT fire, LT/A dash, LB/RB previous/next weapon,
+  // B last weapon, Y / d-pad left-right cycle weapons, X early call, Start pause, Back next track
+  const pad = { connected: false, using: false, gp: null, move: [0, 0], aim: null, aimActive: false, fire: false, prev: [] };
   function pollPad() {
     const list = navigator.getGamepads ? navigator.getGamepads() : [];
     let gp = null;
     for (const g of list) if (g && g.connected) { gp = g; break; }
-    if (!gp) { pad.connected = false; pad.fire = false; pad.move = [0, 0]; pad.aimActive = false; return; }
-    pad.connected = true;
+    if (!gp) { pad.connected = false; pad.gp = null; pad.fire = false; pad.move = [0, 0]; pad.aimActive = false; return; }
+    pad.connected = true; pad.gp = gp;
     const dz = v => (Math.abs(v) < 0.2 ? 0 : v);
     const ax = gp.axes;
     pad.move = [dz(ax[0] || 0), dz(ax[1] || 0)];
@@ -2902,7 +2928,7 @@
     if (pad.aimActive) pad.aim = Math.atan2(ry, rx);
     const btn = i => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.4));
     const hit = i => btn(i) && !pad.prev[i];
-    pad.fire = btn(7) || btn(5) || rm > 0.6;
+    pad.fire = btn(7) || rm > 0.6;
     if (pad.move[0] || pad.move[1] || pad.aimActive || gp.buttons.some(b => b.pressed)) pad.using = true;
 
     const dU = hit(12), dD = hit(13), dL = hit(14), dR = hit(15), a = hit(0), b = hit(1), start = hit(9);
@@ -2925,14 +2951,58 @@
       if (start || b) setPaused(false);
     } else if (state === 'play') {
       if (hit(6) || a) dashQueued = true;
-      if (hit(4) || b) selectWeapon(player.prev);
-      if (hit(3) || dR) cycleWeapon(1);
-      if (dL) cycleWeapon(-1);
+      if (b) selectWeapon(player.prev);
+      if (hit(5) || hit(3) || dR) cycleWeapon(1);
+      if (hit(4) || dL) cycleWeapon(-1);
       if (hit(2)) earlyCall();
       if (hit(8)) A.nextTrack();
       if (start) setPaused(true);
     }
     pad.prev = gp.buttons.map((_, i) => btn(i));
+  }
+  // ---------------------------------------------------------------- haptics (rumble + DualSense triggers)
+  // per shot: [strong motor, weak motor, ms]. Light guns tick the weak motor, heavy ones thump the strong one.
+  const SHOT_RUMBLE = {
+    pistol: [0, 0.35, 45], smg: [0, 0.22, 35], shotgun: [0.75, 0.55, 150], rifle: [0.1, 0.32, 45], rocket: [0.55, 0.35, 140],
+    flamer: [0.05, 0.14, 70], rail: [0.85, 0.7, 230], minigun: [0.28, 0.32, 45], saw: [0.25, 0.35, 70], arc: [0, 0.5, 60],
+  };
+  // R2 resistance per weapon (DualSense only): a snap for single shots, a buzz for automatics, a heavy pull for the rail
+  const FX = HAPTICS.FX;
+  const R2_FEEL = {
+    pistol: FX.weapon(2, 4, 5), smg: FX.vibration(2, 3, 15), shotgun: FX.weapon(2, 5, 8), rifle: FX.vibration(2, 4, 9),
+    rocket: FX.weapon(3, 6, 8), flamer: FX.vibration(1, 2, 36), rail: FX.feedback(2, 7), saw: FX.weapon(2, 4, 6), arc: FX.vibration(2, 5, 60),
+  };
+  const MINIGUN_FEEL = [1, 2, 3, 4, 5, 6, 7, 8].map(a => FX.vibration(1, a, 30)); // buzz grows as the barrels spin up
+  const L2_READY = FX.weapon(2, 4, 3), L2_COOLDOWN = FX.feedback(0, 6); // L2 goes stiff while the dash recharges
+  function rumble(s, w, ms, o) { if (pad.connected || HAPTICS.paired) HAPTICS.rumble(s, w, ms, o); }
+  // a rumble that fades with distance from the player (explosions, boss slams)
+  function rumbleAt(x, y, s, w, ms, reach = 900) {
+    if (!player) return;
+    const k = clamp(1 - Math.hypot(x - player.x, y - player.y) / reach, 0, 1);
+    if (k > 0.05) rumble(s * (0.35 + 0.65 * k), w * k, ms * (0.6 + 0.4 * k));
+  }
+  let heartT = 0;
+  function updateHaptics(rdt) {
+    pairNote = Math.max(0, pairNote - rdt);
+    if (state === 'paused') HAPTICS.stop();
+    // low health: a heartbeat on the heavy motor, faster as it drops
+    if (state === 'play' && player && player.hp / player.maxHp <= 0.3) {
+      heartT -= rdt;
+      if (heartT <= 0) {
+        heartT = 0.55 + (player.hp / player.maxHp) * 2;
+        rumble(0.4, 0, 70); rumble(0.28, 0, 70, { delay: 170 });
+      }
+    } else heartT = 0;
+    HAPTICS.tick(pad.gp);
+    if (HAPTICS.paired) {
+      let r = null, l = null;
+      if (state === 'play' && player && player.dash <= 0) {
+        const w = WEAPONS[player.cur];
+        r = w.spin ? MINIGUN_FEEL[Math.round(player.spin * 7)] : R2_FEEL[w.id];
+        l = player.dashCd > 0 ? L2_COOLDOWN : L2_READY;
+      }
+      HAPTICS.setTriggers(r, l);
+    }
   }
   addEventListener('gamepadconnected', () => { pad.using = true; floatText(player ? player.x : 0, player ? player.y - 40 : 0, 'GAMEPAD CONNECTED', '#5affc8', 9); });
 
@@ -5292,7 +5362,7 @@
       const lines = touch.using
         ? [['LEFT THUMB', 'MOVE'], ['RIGHT THUMB', 'AIM + FIRE'], ['DASH / DOUBLE-TAP LEFT', 'DASH'], ['SWAP / TAP THE BAR', 'WEAPONS'], ['TAP WAVE TIMER', 'EARLY CALL'], ['II BUTTON', 'PAUSE / OPTIONS']]
         : pad.connected && pad.using
-        ? [['LEFT STICK', 'MOVE'], ['RIGHT STICK', 'AIM + FIRE'], ['RT / RB', 'FIRE'], ['LT / A', 'DASH'], ['Y / D-PAD', 'WEAPONS'], ['X', 'EARLY CALL'], ['START', 'PAUSE / OPTIONS']]
+        ? [['LEFT STICK', 'MOVE'], ['RIGHT STICK', 'AIM + FIRE'], ['RT', 'FIRE'], ['LT / A', 'DASH'], ['LB / RB', 'WEAPONS'], ['X', 'EARLY CALL'], ['START', 'PAUSE / OPTIONS']]
         : [['WASD', 'MOVE'], ['MOUSE', 'AIM'], ['CLICK', 'FIRE'], ['SPACE / RMB', 'DASH'], ['1-0 / WHEEL / Q', 'WEAPONS'], ['F', 'EARLY CALL'], ['ESC', 'PAUSE / OPTIONS'], ['M / N', 'MUSIC / NEXT TRACK']];
       lines.forEach(([k, v], i) => {
         utext(k, W / 2 - 14, cy0 + i * (cs + 9), cs * 1.55, '#ff7ad8', 'right', 'top', 700, 2);
@@ -5375,11 +5445,14 @@
       const vx = x + w - 230;
       text('<', vx, y + cy, 12, sel ? '#ffffff' : '#6a6a88', 'left', 'middle', false);
       text('>', x + w - 26, y + cy, 12, sel ? '#ffffff' : '#6a6a88', 'left', 'middle', false);
-      if (o.names) utext(o.names[v], vx + 100, y + cy, 15, '#ffd23a', 'center', 'middle', 700, 2, false);
+      const unpaired = o.key === 'triggers' && v && !HAPTICS.paired;
+      if (o.names) utext(unpaired ? 'PAIR' : o.names[v], vx + 100, y + cy, 15, unpaired ? '#ff7ad8' : '#ffd23a', 'center', 'middle', 700, 2, false);
       else for (let k = 0; k < o.max; k++) { ctx.fillStyle = k < v ? '#ffd23a' : 'rgba(255,255,255,0.12)'; ctx.fillRect(vx + 26 + k * 15, y + cy - 8, 11, 16); }
     });
     const bottom = y0 + OPTS.length * (rh + gap);
-    utext(touch.using ? 'TAP THE LEFT / RIGHT HALF OF A ROW TO CHANGE IT' : 'ARROWS / D-PAD TO CHANGE  ·  CLICK LEFT / RIGHT HALF OF A ROW', W / 2, bottom + 4, 12, '#8a8ab0', 'center', 'top', 600, 1);
+    const pairHint = settings.triggers && !HAPTICS.paired && (pairNote > 0 || (OPTS[optSel] && OPTS[optSel].key === 'triggers'));
+    if (pairHint) utext('PLUG IN THE DUALSENSE, THEN CLICK THIS ROW TO PAIR', W / 2, bottom + 4, 12, '#ff7ad8', 'center', 'top', 600, 1);
+    else utext(touch.using ? 'TAP THE LEFT / RIGHT HALF OF A ROW TO CHANGE IT' : 'ARROWS / D-PAD TO CHANGE  ·  CLICK LEFT / RIGHT HALF OF A ROW', W / 2, bottom + 4, 12, '#8a8ab0', 'center', 'top', 600, 1);
     return bottom + 20;
   }
 
@@ -5606,6 +5679,7 @@
     fadeIn = Math.max(0, fadeIn - rdt / 0.8);
     VIEW = VIEW_BASE * (1 + zoomCur + fadeIn * fadeIn * 0.4);
     pollPad();
+    updateHaptics(rdt);
     const steps = state === 'paused' || state === 'menu' ? 1 : sim.speed;
     for (let i = 0; i < steps; i++) {
       if (sim.onTick) sim.onTick(dt);

@@ -167,6 +167,8 @@
     'BRIGHTNESS': 'ЯРКОСТЬ', 'DARK': 'ТЕМНО', 'NORMAL': 'НОРМА', 'BRIGHT': 'ЯРКО',
     'POST FX': 'ПОСТЭФФЕКТЫ', 'HIGH': 'ВЫСОКО',
     'SCANLINES': 'РАЗВЁРТКА ЭЛТ', 'ON': 'ВКЛ',
+    'RUMBLE': 'ВИБРАЦИЯ', 'DUALSENSE TRIGGERS': 'КУРКИ DUALSENSE', 'PAIR': 'ПОДКЛЮЧИТЬ',
+    'PLUG IN THE DUALSENSE, THEN CLICK THIS ROW TO PAIR': 'ПОДКЛЮЧИТЕ DUALSENSE И КЛИКНИТЕ ПО ЭТОЙ СТРОКЕ',
     'LANGUAGE': 'ЯЗЫК / LANGUAGE', // findable by someone who can't read Russian
     'OPTIONS': 'НАСТРОЙКИ', '[Y] OPTIONS': '[Y] НАСТРОЙКИ', '[O] OPTIONS': '[O] НАСТРОЙКИ',
     'TAP OUTSIDE TO CLOSE': 'КОСНИСЬ ЗА ПРЕДЕЛАМИ МЕНЮ, ЧТОБЫ ЗАКРЫТЬ', 'ESC / CLICK OUTSIDE TO CLOSE': 'ESC / КЛИК ВНЕ МЕНЮ - ЗАКРЫТЬ',

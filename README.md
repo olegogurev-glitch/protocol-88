@@ -19,12 +19,17 @@ Options → Soundtrack switches between STUDIO and SYNTH.
 |---|---|---|
 | WASD | Left stick | Move |
 | Mouse | Right stick | Aim (right stick also fires) |
-| Click | RT / RB | Fire |
+| Click | RT | Fire |
 | Space / Shift / RMB | LT / A | Dash |
-| 1–0, wheel, Q | Y, d-pad, LB / B | Weapons |
+| 1–0, wheel, Q | LB / RB (previous / next), d-pad, Y, B (last weapon) | Weapons |
 | F / Enter | X | Call the next wave early |
 | Esc / P | Start | Pause + options |
 | M / N | Back (next track) | Music on/off, next track |
+
+## Controller haptics
+
+Rumble works on any pad the browser can vibrate (Chrome, Edge, Safari): each weapon has its own kick, plus hits, explosions, boss slams, dodges, a low-health heartbeat and a long rumble on death. Options → RUMBLE sets OFF / LOW / FULL.
+DualSense adaptive triggers (Chrome / Edge on a computer): Options → DUALSENSE TRIGGERS → ON, then click the row (or press Right on the keyboard) and pick the controller in the browser's device list. Browsers only open that list from a mouse click or a key press, never from a gamepad button. R2's resistance follows the weapon in hand, and L2 stiffens while the dash recharges. The browser remembers the pairing. The code is in `js/haptics.js`.
 
 ## Starting kits
 
@@ -41,6 +46,7 @@ All text lives in English in the code and goes through `I18N.t()` when drawn; `j
 - `index.html` — page shell. Bump the `?v=` on the script tags after changing code so browsers don't serve stale copies.
 - `js/game.js` — gameplay, rendering, HUD, input.
 - `js/i18n.js` — translations (Russian) and language detection.
+- `js/haptics.js` — controller rumble and DualSense trigger effects (WebHID).
 - `js/audio.js` — the studio soundtrack player, the procedural synth score (8 songs) and all sound effects.
 - `music/` — the studio soundtrack (MP3). Track names, roles and tempos are in the `OST` table in `js/audio.js`; sources in `music/CREDITS.md`.
   The tracks are licensed stock music (Envato Elements) for use in this game only; they are not licensed for reuse elsewhere.
