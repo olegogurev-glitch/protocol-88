@@ -18,7 +18,7 @@ Options → Soundtrack switches between STUDIO and SYNTH.
 | Keyboard / mouse | Gamepad | Action |
 |---|---|---|
 | WASD | Left stick | Move |
-| Mouse | Right stick | Aim (right stick also fires) |
+| Mouse | Right stick | Aim |
 | Click | RT | Fire |
 | Space / Shift / RMB | LT / A | Dash |
 | 1–0, wheel, Q | LB / RB (previous / next), d-pad, Y, B (last weapon) | Weapons |
@@ -29,7 +29,7 @@ Options → Soundtrack switches between STUDIO and SYNTH.
 ## Controller haptics
 
 Rumble works on any pad the browser can vibrate (Chrome, Edge, Safari): each weapon has its own kick, plus hits, explosions, boss slams, dodges, a low-health heartbeat and a long rumble on death. Options → RUMBLE sets OFF / LOW / FULL.
-DualSense adaptive triggers (Chrome / Edge on a computer): Options → DUALSENSE TRIGGERS → ON, then click the row (or press Right on the keyboard) and pick the controller in the browser's device list. Browsers only open that list from a mouse click or a key press, never from a gamepad button. R2's resistance follows the weapon in hand, and L2 stiffens while the dash recharges. The browser remembers the pairing. The code is in `js/haptics.js`.
+DualSense adaptive triggers (Chrome / Edge on a computer): Options → DUALSENSE TRIGGERS → ON, then click the row (or press Right on the keyboard) and pick the controller in the browser's device list. Browsers only open that list from a mouse click or a key press, never from a gamepad button. R2's resistance follows the weapon in hand, and L2 stiffens while the dash recharges. The browser remembers the pairing. A paired DualSense keeps rumbling through WebHID when the trigger setting is OFF, since some browsers can't vibrate a DualSense through the Gamepad API. The code is in `js/haptics.js`.
 
 ## Starting kits
 

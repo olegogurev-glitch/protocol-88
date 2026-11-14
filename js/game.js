@@ -2713,8 +2713,8 @@
     if (save && !NO_SAVE) try { localStorage.setItem('p88-settings', JSON.stringify(settings)); } catch (e) { /* ignore */ }
   }
   applySettings(false);
-  // a controller paired on an earlier visit reconnects without asking
-  if (settings.triggers && !NO_SAVE) HAPTICS.enableTriggers(true, false);
+  // a DualSense paired on an earlier visit reconnects without asking: rumble always, triggers if they're on
+  if (!NO_SAVE) HAPTICS.enableTriggers(!!settings.triggers, false).then(() => HAPTICS.connect(false));
   let pairNote = 0; // seconds left on the "pair with mouse / keyboard" hint
   function changeOpt(i, d) {
     const o = OPTS[i];
@@ -2911,7 +2911,7 @@
   });
 
   // ---------------------------------------------------------------- gamepad (twin-stick)
-  // left stick move, right stick aim + fire, RT fire, LT/A dash, LB/RB previous/next weapon,
+  // left stick move, right stick aim, RT fire, LT/A dash, LB/RB previous/next weapon,
   // B last weapon, Y / d-pad left-right cycle weapons, X early call, Start pause, Back next track
   const pad = { connected: false, using: false, gp: null, move: [0, 0], aim: null, aimActive: false, fire: false, prev: [] };
   function pollPad() {
@@ -2928,7 +2928,7 @@
     if (pad.aimActive) pad.aim = Math.atan2(ry, rx);
     const btn = i => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.4));
     const hit = i => btn(i) && !pad.prev[i];
-    pad.fire = btn(7) || rm > 0.6;
+    pad.fire = btn(7); // the right stick only aims
     if (pad.move[0] || pad.move[1] || pad.aimActive || gp.buttons.some(b => b.pressed)) pad.using = true;
 
     const dU = hit(12), dD = hit(13), dL = hit(14), dR = hit(15), a = hit(0), b = hit(1), start = hit(9);
@@ -2966,14 +2966,15 @@
     pistol: [0, 0.35, 45], smg: [0, 0.22, 35], shotgun: [0.75, 0.55, 150], rifle: [0.1, 0.32, 45], rocket: [0.55, 0.35, 140],
     flamer: [0.05, 0.14, 70], rail: [0.85, 0.7, 230], minigun: [0.28, 0.32, 45], saw: [0.25, 0.35, 70], arc: [0, 0.5, 60],
   };
-  // R2 resistance per weapon (DualSense only): a snap for single shots, a buzz for automatics, a heavy pull for the rail
+  // R2 resistance per weapon (DualSense only), strengths 1..8. Single-shot guns get a pull that builds
+  // smoothly (heavier for heavier guns), automatics a light buzz. Kept low: past ~5 it fights the finger.
   const FX = HAPTICS.FX;
   const R2_FEEL = {
-    pistol: FX.weapon(2, 4, 5), smg: FX.vibration(2, 3, 15), shotgun: FX.weapon(2, 5, 8), rifle: FX.vibration(2, 4, 9),
-    rocket: FX.weapon(3, 6, 8), flamer: FX.vibration(1, 2, 36), rail: FX.feedback(2, 7), saw: FX.weapon(2, 4, 6), arc: FX.vibration(2, 5, 60),
+    pistol: FX.ramp(2, 6, 1, 2), smg: FX.vibration(3, 1, 15), shotgun: FX.ramp(2, 7, 1, 4), rifle: FX.vibration(3, 2, 9),
+    rocket: FX.ramp(1, 8, 1, 4), flamer: FX.vibration(3, 1, 36), rail: FX.ramp(1, 8, 1, 3), saw: FX.ramp(2, 6, 1, 3), arc: FX.vibration(3, 2, 60),
   };
-  const MINIGUN_FEEL = [1, 2, 3, 4, 5, 6, 7, 8].map(a => FX.vibration(1, a, 30)); // buzz grows as the barrels spin up
-  const L2_READY = FX.weapon(2, 4, 3), L2_COOLDOWN = FX.feedback(0, 6); // L2 goes stiff while the dash recharges
+  const MINIGUN_FEEL = [1, 2, 3, 4].map(a => FX.vibration(2, a, 30)); // buzz grows as the barrels spin up
+  const L2_READY = FX.ramp(2, 6, 1, 2), L2_COOLDOWN = FX.ramp(1, 5, 1, 3); // L2 firms up while the dash recharges
   function rumble(s, w, ms, o) { if (pad.connected || HAPTICS.paired) HAPTICS.rumble(s, w, ms, o); }
   // a rumble that fades with distance from the player (explosions, boss slams)
   function rumbleAt(x, y, s, w, ms, reach = 900) {
@@ -2998,7 +2999,7 @@
       let r = null, l = null;
       if (state === 'play' && player && player.dash <= 0) {
         const w = WEAPONS[player.cur];
-        r = w.spin ? MINIGUN_FEEL[Math.round(player.spin * 7)] : R2_FEEL[w.id];
+        r = w.spin ? MINIGUN_FEEL[Math.round(player.spin * 3)] : R2_FEEL[w.id];
         l = player.dashCd > 0 ? L2_COOLDOWN : L2_READY;
       }
       HAPTICS.setTriggers(r, l);
@@ -5362,7 +5363,7 @@
       const lines = touch.using
         ? [['LEFT THUMB', 'MOVE'], ['RIGHT THUMB', 'AIM + FIRE'], ['DASH / DOUBLE-TAP LEFT', 'DASH'], ['SWAP / TAP THE BAR', 'WEAPONS'], ['TAP WAVE TIMER', 'EARLY CALL'], ['II BUTTON', 'PAUSE / OPTIONS']]
         : pad.connected && pad.using
-        ? [['LEFT STICK', 'MOVE'], ['RIGHT STICK', 'AIM + FIRE'], ['RT', 'FIRE'], ['LT / A', 'DASH'], ['LB / RB', 'WEAPONS'], ['X', 'EARLY CALL'], ['START', 'PAUSE / OPTIONS']]
+        ? [['LEFT STICK', 'MOVE'], ['RIGHT STICK', 'AIM'], ['RT', 'FIRE'], ['LT / A', 'DASH'], ['LB / RB', 'WEAPONS'], ['X', 'EARLY CALL'], ['START', 'PAUSE / OPTIONS']]
         : [['WASD', 'MOVE'], ['MOUSE', 'AIM'], ['CLICK', 'FIRE'], ['SPACE / RMB', 'DASH'], ['1-0 / WHEEL / Q', 'WEAPONS'], ['F', 'EARLY CALL'], ['ESC', 'PAUSE / OPTIONS'], ['M / N', 'MUSIC / NEXT TRACK']];
       lines.forEach(([k, v], i) => {
         utext(k, W / 2 - 14, cy0 + i * (cs + 9), cs * 1.55, '#ff7ad8', 'right', 'top', 700, 2);

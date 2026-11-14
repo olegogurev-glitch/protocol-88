@@ -8,8 +8,9 @@
 // DualSense adaptive triggers: browsers don't expose them through the Gamepad API, so the player
 // pairs the controller once over WebHID (Chrome / Edge, from Options). After that the page talks
 // to it directly with DualSense output reports (USB report 0x02, Bluetooth report 0x31 + CRC32):
-// the trigger resistance follows the weapon in hand, and the rumble goes through the same reports.
-// Chrome remembers the pairing, so later visits reconnect without asking.
+// the trigger resistance follows the weapon in hand, and the rumble goes through the same reports
+// (also with the trigger setting off). Chrome remembers the pairing, so later visits reconnect
+// without asking.
 window.HAPTICS = (() => {
   const HID = 'hid' in navigator;
   let gain = 1;
@@ -73,6 +74,16 @@ window.HAPTICS = (() => {
       for (let i = pos; i < 10; i++) { zones |= 1 << i; force += f * 2 ** (3 * i); }
       return [0x21, zones & 0xff, zones >> 8, force & 0xff, (force >>> 8) & 0xff, (force >>> 16) & 0xff, (force >>> 24) & 0xff, 0, 0, 0, 0];
     },
+    // resistance that builds smoothly from strength s0 at zone `start` to s1 at zone `end`, then holds
+    ramp(start, end, s0, s1) {
+      let zones = 0, force = 0;
+      for (let i = start; i < 10; i++) {
+        const k = end > start ? Math.min(1, (i - start) / (end - start)) : 1;
+        const f = (Math.round(s0 + (s1 - s0) * k) - 1) & 7;
+        zones |= 1 << i; force += f * 2 ** (3 * i);
+      }
+      return [0x21, zones & 0xff, zones >> 8, force & 0xff, (force >>> 8) & 0xff, (force >>> 16) & 0xff, (force >>> 24) & 0xff, 0, 0, 0, 0];
+    },
     // a wall between `start` and `end` (2..8) that gives way with a snap - a gun's sear
     weapon(start, end, str) {
       const z = (1 << start) | (1 << end);
@@ -93,11 +104,11 @@ window.HAPTICS = (() => {
     sent: { r: '', l: '', s: -1, w: -1 },              // what it was last told
     busy: false, failed: false,
   };
-  let enabled = false;
+  let triggersOn = false; // the trigger effects are a setting of their own; rumble keeps using a paired pad either way
 
   function setTriggers(r, l) {
     if (!ds.dev) return;
-    ds.want.r = r || FX.off(); ds.want.l = l || FX.off();
+    ds.want.r = (triggersOn && r) || FX.off(); ds.want.l = (triggersOn && l) || FX.off();
     dsFlush();
   }
   function dsMotors(s, w) {
@@ -160,22 +171,11 @@ window.HAPTICS = (() => {
     dsFlush();
     return true;
   }
-  async function release() {
-    const dev = ds.dev;
-    if (!dev) return;
-    ds.want = { r: FX.off(), l: FX.off(), s: 0, w: 0 };
-    while (ds.busy) await new Promise(r => setTimeout(r, 10));
-    await dsFlush();
-    ds.dev = null;
-    try { await dev.close(); } catch (e) { /* already gone */ }
-  }
-
-  // turn the trigger feature on or off. On: reconnects a controller paired before; with
-  // `ask` (only from a click or key press - the browser's rule) it opens the device chooser.
-  async function enableTriggers(on, ask) {
-    enabled = on;
+  // open a DualSense this site was allowed before; with `ask` (only from a click or key press -
+  // the browser's rule) open the device chooser when there is none. Once open, all rumble goes
+  // through it - some browsers can't vibrate a DualSense through the Gamepad API at all.
+  async function connect(ask) {
     if (!HID) return false;
-    if (!on) { await release(); return false; }
     if (ds.dev) return true;
     try {
       const known = (await navigator.hid.getDevices()).filter(isDS);
@@ -188,15 +188,21 @@ window.HAPTICS = (() => {
       return false;
     }
   }
+  // turning the triggers off only relaxes them; the pad stays paired for rumble
+  async function enableTriggers(on, ask) {
+    triggersOn = on;
+    if (!on) { setTriggers(null, null); return !!ds.dev; }
+    return connect(ask);
+  }
   if (HID) {
-    navigator.hid.addEventListener('connect', e => { if (enabled && !ds.dev && isDS(e.device)) open(e.device); });
+    navigator.hid.addEventListener('connect', e => { if (!ds.dev && isDS(e.device)) open(e.device); }); // only pads this site was allowed
     navigator.hid.addEventListener('disconnect', e => { if (e.device === ds.dev) ds.dev = null; });
   }
   // never leave the triggers stiff after the page goes away
   addEventListener('pagehide', () => { if (ds.dev) { ds.want.r = FX.off(); ds.want.l = FX.off(); ds.want.s = ds.want.w = 0; dsFlush(); } });
 
   return {
-    rumble, tick, stop, FX, setTriggers, enableTriggers,
+    rumble, tick, stop, FX, setTriggers, enableTriggers, connect,
     setGain(g) { gain = g; if (g <= 0) stop(); },
     get hid() { return HID; },
     get paired() { return !!ds.dev; },
